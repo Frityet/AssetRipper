@@ -102,6 +102,7 @@
 		WorldSpaceViewDir,
 
 		// extra
-		Comment
+		Comment,
+		LogicalNot // proven comparison-mask complement; not an arbitrary integer NOT
 	}
 }

@@ -13,6 +13,24 @@ public class ShaderExportCollection : AssetExportCollection<IShader>
 	{
 	}
 
+	protected override bool ExportInner(IExportContainer container, string filePath, string dirPath)
+	{
+		bool written = base.ExportInner(container, filePath, dirPath);
+		string? trace = System.Environment.GetEnvironmentVariable("NATIVEH3VR_SHADER_EXPORT_TRACE");
+		if (written && trace is not null)
+		{
+			string relative = System.IO.Path.GetRelativePath(dirPath, filePath).Replace('\\', '/');
+			string line = System.Text.Json.JsonSerializer.Serialize(new {
+				collection = Asset.Collection.Name,
+				pathId = Asset.PathID,
+				guid = GUID.ToString(),
+				path = relative
+			});
+			System.IO.File.AppendAllText(trace, line + "\n");
+		}
+		return written;
+	}
+
 	protected override IUnityObjectBase CreateImporter(IExportContainer container)
 	{
 		IShaderImporter importer = ShaderImporter.Create(container.File, container.ExportVersion);

@@ -41,7 +41,8 @@
 		// there's a lot so obviously incomplete
 		public static readonly HashSet<string?> INCLUDED_UNITY_PROP_NAMES = new()
 		{
-			"unity_ObjectToWorld",
+			"unity_DeltaTime", "unity_OrthoParams", "unity_CameraProjection", "unity_CameraInvProjection", "unity_WorldToCamera", "unity_CameraToWorld",
+            "unity_ObjectToWorld",
 			"unity_WorldToObject",
 			"unity_MatrixVP",
 			"unity_MatrixV",

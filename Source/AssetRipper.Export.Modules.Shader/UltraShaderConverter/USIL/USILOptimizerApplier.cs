@@ -33,7 +33,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 			new USILCompareOrderOptimizer(),
 			new USILAddNegativeOptimizer(),
 			new USILAndOptimizer(),
-			new USILForLoopOptimizer(),
+			// Disabled: renames loop registers without reliably creating for-loop declarations.
+			// new USILForLoopOptimizer(),
 		};
 
 		public static void Apply(UShaderProgram shader, ShaderSubProgram shaderData)

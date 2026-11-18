@@ -1,4 +1,4 @@
-﻿using AssetRipper.Assets;
+using AssetRipper.Assets;
 using AssetRipper.Assets.Generics;
 using AssetRipper.Export.Modules.Shaders.Exporters;
 using AssetRipper.Export.Modules.Shaders.Exporters.DirectX;
@@ -158,6 +158,25 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 			writer.Write("}\n");
 		}
 
+        private static bool PreserveVariantsFor(IShader shader) => true;
+        private static HashSet<string> Keys(ShaderSubProgram p) => p.LocalKeywords.Concat(p.GlobalKeywords).ToHashSet();
+        private sealed record ProgramPair(ShaderSubProgram? Vertex, ShaderSubProgram? Fragment, string[] Keywords);
+        private static List<ProgramPair> PairPrograms(List<ShaderSubProgram>? vertices, List<ShaderSubProgram>? fragments, bool preserve) {
+            if (!preserve) return new(){new(vertices?.First(), fragments?.First(), Array.Empty<string>())};
+            var vs=(vertices ?? new()).GroupBy(p=>string.Join(" ",Keys(p).OrderBy(k=>k))).Select(g=>g.First()).ToList();
+            var fs=(fragments ?? new()).GroupBy(p=>string.Join(" ",Keys(p).OrderBy(k=>k))).Select(g=>g.First()).ToList();
+            var vk=vs.SelectMany(Keys).ToHashSet();var fk=fs.SelectMany(Keys).ToHashSet();
+            var shared=vk.Intersect(fk).ToHashSet();
+            var result=new List<ProgramPair>();
+            foreach(var v in vs) foreach(var f in fs) {
+                var a=Keys(v);var b=Keys(f);
+                if(!a.Intersect(shared).ToHashSet().SetEquals(b.Intersect(shared))) continue;
+                result.Add(new(v,f,a.Union(b).OrderBy(k=>k).ToArray()));
+            }
+            if(result.Count==0) throw new InvalidOperationException("No compatible original vertex/fragment variants");
+            return result.GroupBy(p=>string.Join(" ",p.Keywords)).Select(g=>g.First()).OrderByDescending(p=>p.Keywords.Length).ToList();
+        }
+
 		private static void ExportPassDecomp(ISerializedPass _this, ShaderWriter writer)
 		{
 			writer.WriteIndent(2);
@@ -214,14 +233,26 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 						}
 					}
 
-					ShaderSubProgram? vertexSubProgram = null;
+					bool preserveVariants = PreserveVariantsFor(writer.Shader);
+                    var pairs = PairPrograms(vertexSubPrograms, fragmentSubPrograms, preserveVariants);
+                    var allKeywords = pairs.SelectMany(p => p.Keywords).Distinct().OrderBy(k=>k).ToArray();
+                    writer.WriteLine("CGPROGRAM");
+                    writer.WriteLine("#pragma target 4.5");
+                    if (preserveVariants) foreach(var keyword in allKeywords) writer.WriteLine($"#pragma shader_feature __ {keyword}");
+                    int pairIndex = 0;
+                    foreach (var pair in pairs) {
+                    if(preserveVariants) {
+                        string condition=allKeywords.Length==0 ? "1" : string.Join(" && ",allKeywords.Select(k=>pair.Keywords.Contains(k) ? $"defined({k})" : $"!defined({k})"));
+                        writer.WriteLine($"{(pairIndex++==0 ? "#if" : "#elif")} {condition}");
+                    }
+                    ShaderSubProgram? vertexSubProgram = null;
 					ShaderSubProgram? fragmentSubProgram = null;
 					USCShaderConverter? vertexConverter = null;
 					USCShaderConverter? fragmentConverter = null;
 
 					if (hasVertex)
 					{
-						vertexSubProgram = vertexSubPrograms![0];
+						vertexSubProgram = pair.Vertex!;
 
 						byte[] trimmedProgramData = TrimShaderBytes(vertexSubProgram, writer.Version, writer.Platform);
 
@@ -230,7 +261,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 					}
 					if (hasFragment)
 					{
-						fragmentSubProgram = fragmentSubPrograms![0];
+						fragmentSubProgram = pair.Fragment!;
 
 						byte[] trimmedProgramData = TrimShaderBytes(fragmentSubProgram, writer.Version, writer.Platform);
 
@@ -239,7 +270,6 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 					}
 
 					writer.WriteIndent(3);
-					writer.WriteLine("CGPROGRAM");
 
 					if (hasVertex)
 					{
@@ -362,7 +392,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 						writer.WriteIndent(3);
 						writer.WriteLine("// Texture params for Vertex Shader");
 
-						ExportPassTextureParamDefinitions(vertexSubProgram!, writer, declaredBufs, 3);
+						ExportPassTextureParamDefinitions(vertexSubProgram!, vertexConverter!.DxShader!, writer, declaredBufs, 3);
 					}
 
 					if (hasFragment)
@@ -370,7 +400,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 						writer.WriteIndent(3);
 						writer.WriteLine("// Texture params for Fragment Shader");
 
-						ExportPassTextureParamDefinitions(fragmentSubProgram!, writer, declaredBufs, 3);
+						ExportPassTextureParamDefinitions(fragmentSubProgram!, fragmentConverter!.DxShader!, writer, declaredBufs, 3);
 					}
 
 					writer.WriteIndent(3);
@@ -431,7 +461,9 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 					}
 
 					writer.WriteIndent(3);
-					writer.WriteLine("ENDCG");
+					}
+                    if(preserveVariants) writer.WriteLine("#else\n#error Original shader has no recovered variant for this keyword combination\n#endif");
+                    writer.WriteLine("ENDCG");
 				}
 				else
 				{
@@ -504,42 +536,47 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 			}
 		}
 
-		private static void ExportPassTextureParamDefinitions(ShaderSubProgram _this, ShaderWriter writer, HashSet<string?> declaredBufs, int depth)
-		{
-			foreach (TextureParameter param in _this.TextureParameters)
-			{
-				string name = param.Name;
-				if (!declaredBufs.Contains(name) && !UnityShaderConstants.BUILTIN_TEXTURE_NAMES.Contains(name))
-				{
-					writer.WriteIndent(depth);
-					if (param.Dim == 2)
-					{
-						writer.WriteLine($"sampler2D {name};");
-					}
-					else if (param.Dim == 3)
-					{
-						writer.WriteLine($"sampler3D {name};");
-					}
-					else if (param.Dim == 4)
-					{
-						writer.WriteLine($"samplerCUBE {name};");
-					}
-					else if (param.Dim == 5)
-					{
-						writer.WriteLine($"UNITY_DECLARE_TEX2DARRAY({name});");
-					}
-					else if (param.Dim == 6)
-					{
-						writer.WriteLine($"UNITY_DECLARE_TEXCUBEARRAY({name});");
-					}
-					else
-					{
-						writer.WriteLine($"sampler2D {name}; // Unsure of real type ({param.Dim})");
-					}
-					declaredBufs.Add(name);
-				}
-			}
-		}
+		private static string GetTextureDeclaration(TextureParameter param, IEnumerable<SHDRInstruction> instructions)
+        {
+            if (param.MultiSampled) throw new NotSupportedException("Multisampled texture declaration: " + param.Name);
+            var modes = instructions.Where(i => i.opcode == Opcode.dcl_sampler &&
+                i.declData != null && i.declData.samplerIndex == param.SamplerIndex)
+                .Select(i => i.declData!.samplerMode).Distinct().ToArray();
+            if (modes.Length > 1) throw new InvalidDataException("Conflicting original sampler modes: " + param.Name);
+            bool comparison = modes.Length == 1 && modes[0] == SamplerMode.Comparison;
+            string kind = param.Dim switch {
+                2 => "Texture2D", 3 => "Texture3D", 4 => "TextureCube",
+                5 => "Texture2DArray", 6 => "TextureCubeArray",
+                _ => throw new NotSupportedException("Unknown original texture dimension: " + param.Dim)
+            };
+            if (comparison && param.Dim == 3) throw new NotSupportedException("Comparison sampler on 3D texture");
+            string element = comparison ? "float" : "float4";
+            string sampler = comparison ? "SamplerComparisonState" : "SamplerState";
+            return $"{kind}<{element}> {param.Name}; {sampler} sampler{param.Name};";
+        }
+
+		private static void ExportPassTextureParamDefinitions(ShaderSubProgram program, DirectXCompiledShader dxShader,
+            ShaderWriter writer, HashSet<string?> declaredBufs, int depth)
+        {
+            foreach (TextureParameter param in program.TextureParameters)
+            {
+                string name = param.Name;
+                if (declaredBufs.Contains(name) ||
+                    (UnityShaderConstants.BUILTIN_TEXTURE_NAMES.Contains(name) && name != "_ShadowMapTexture")) continue;
+                // UnityCG supplies this one only inside its deprecated collector
+                // helpers; ordinary recovered lighting passes still need it.
+                if (name == "_ShadowMapTexture") {
+                    writer.WriteIndent(depth);
+                    writer.WriteLine("#if !defined(SHADOW_COLLECTOR_PASS) || defined(SHADOWMAPSAMPLER_DEFINED)");
+                }
+                writer.WriteIndent(depth);
+                writer.WriteLine(GetTextureDeclaration(param, dxShader.Shdr.shaderInstructions));
+                if (name == "_ShadowMapTexture") {
+                    writer.WriteIndent(depth); writer.WriteLine("#endif");
+                }
+                declaredBufs.Add(name);
+            }
+        }
 
 		private static void ExportSerializedProgramDecomp(ISerializedProgram _this, ShaderWriter writer, ShaderType type)
 		{
@@ -640,6 +677,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 					}
 				}
 
+				if (!PreserveVariantsFor(shader)) {
 				// skip instanced shaders
 				Utf8String INSTANCING_ON = "INSTANCING_ON"u8;
 				if (pass.NameIndices.ContainsKey(INSTANCING_ON))
@@ -771,6 +809,8 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 				{
 					matched = false;
 				}
+
+                }
 
 				if (matchedProgram != null)
 				{

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 
 namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 {
@@ -8,6 +8,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 		public USILOperand? destOperand { get; set; }
 		public required List<USILOperand> srcOperands { get; set; }
 		public bool saturate { get; set; }
+        // Original signed texel-space offsets; never fold these into UVs.
+        public int[] textureOffsets { get; set; } = Array.Empty<int>();
 		public bool commented { get; set; }
 
 		public bool isIntVariant { get; set; }

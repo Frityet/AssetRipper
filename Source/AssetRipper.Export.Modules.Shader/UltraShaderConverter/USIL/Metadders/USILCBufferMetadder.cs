@@ -47,7 +47,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL.Metadders
 				foreach (NumericShaderParameter param in constantBuffer.AllNumericParams)
 				{
 					int paramCbStart = param.Index;
-					int paramCbSize = param.RowCount * param.ColumnCount * 4;
+					int paramStride = param.IsMatrix ? param.RowCount * param.ColumnCount * 4 : 16;
+                    int paramCbSize = param.ArraySize > 0 ? paramStride * param.ArraySize : param.RowCount * param.ColumnCount * 4;
 					int paramCbEnd = paramCbStart + paramCbSize;
 
 					foreach (int operandMaskAddress in operandMaskAddresses)
@@ -57,6 +58,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL.Metadders
 							cbParams.Add(param);
 
 							int maskIndex = (operandMaskAddress - paramCbStart) / 4;
+                            if (param.ArraySize > 0) maskIndex %= paramStride / 4;
 							if (param.IsMatrix)
 							{
 								maskIndex %= 4;
@@ -82,6 +84,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL.Metadders
 								cbParams.Add(cbParam);
 
 								int maskIndex = (operandMaskAddress - paramCbStart) / 4;
+
 								if (cbParam.IsMatrix)
 								{
 									maskIndex %= 4;
@@ -136,14 +139,35 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL.Metadders
 					operand.mask = cbMasks.ToArray();
 					operand.metadataName = param.Name;
 					operand.metadataNameAssigned = true;
-					operand.metadataNameWithArray = operand.arrayRelative != null && !param.IsMatrix;
+					operand.metadataNameWithArray = false;
+                    if (param.ArraySize > 0) {
+                        int registersPerElement = param.IsMatrix ? param.RowCount : 1;
+                        string relative = operand.arrayRelative == null ? "0" : $"(int)({operand.arrayRelative})";
+                        operand.metadataName = $"{param.Name}[({relative} + {operand.arrayIndex}) / {registersPerElement}]";
+                        operand.arrayIndex %= registersPerElement;
+                        operand.arrayRelative = null;
+                    }
 
-					if (cbMasks.Count == param.RowCount && !param.IsMatrix)
+
+					// Hiding a swizzle is only safe when the instruction reads every
+					// component once and in identity order. A count-only check loses
+					// broadcasts such as `.yyyy` and permutations such as `.yx`.
+					if (!param.IsMatrix && IsIdentityComponentMask(cbMasks, param.RowCount))
 					{
 						operand.displayMask = false;
 					}
 				}
 			}
+		}
+
+		private static bool IsIdentityComponentMask(IReadOnlyList<int> mask, int width)
+		{
+			if (width <= 0 || mask.Count != width) return false;
+			for (int i = 0; i < width; i++)
+			{
+				if (mask[i] != i) return false;
+			}
+			return true;
 		}
 
 		private static int[] MatchMaskToConstantBuffer(int[] mask, int pos, int size)

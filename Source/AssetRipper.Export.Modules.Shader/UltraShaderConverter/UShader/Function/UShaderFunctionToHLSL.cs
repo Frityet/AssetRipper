@@ -1,4 +1,4 @@
-﻿using AssetRipper.Export.Modules.Shaders.Extensions;
+using AssetRipper.Export.Modules.Shaders.Extensions;
 using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL;
 using System.Globalization;
 using System.Text;
@@ -34,7 +34,9 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.MultiplyAdd, new InstHandler(HandleMultiplyAdd) },
 				{ USILInstructionType.And, new InstHandler(HandleAnd) },
 				{ USILInstructionType.Or, new InstHandler(HandleOr) },
+                { USILInstructionType.Xor, new InstHandler(HandleXor) },
 				{ USILInstructionType.Not, new InstHandler(HandleNot) },
+                { USILInstructionType.LogicalNot, new InstHandler(HandleLogicalNot) },
 				{ USILInstructionType.Minimum, new InstHandler(HandleMinimum) },
 				{ USILInstructionType.Maximum, new InstHandler(HandleMaximum) },
 				{ USILInstructionType.SquareRoot, new InstHandler(HandleSquareRoot) },
@@ -60,6 +62,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.SampleComparison, new InstHandler(HandleSample) },
 				{ USILInstructionType.SampleComparisonLODZero, new InstHandler(HandleSample) },
 				{ USILInstructionType.SampleLOD, new InstHandler(HandleSampleLOD) },
+                { USILInstructionType.SampleLODBias, new InstHandler(HandleSampleLOD) },
 				{ USILInstructionType.SampleDerivative, new InstHandler(HandleSampleDerivative) },
 				{ USILInstructionType.LoadResource, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceMultisampled, new InstHandler(HandleLoadResource) },
@@ -216,6 +219,21 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 			string value = $"uint{op0UintSize}({srcOps[0]}) | uint{op1UintSize}({srcOps[1]})";
 			string comment = CommentString(inst);
 			AppendLine($"{comment}{inst.destOperand} = {value};");
+		}
+
+		private void HandleXor(USILInstruction inst)
+		{
+			List<USILOperand> srcOps = inst.srcOperands;
+			int op0UintSize = srcOps[0].GetValueCount();
+			int op1UintSize = srcOps[1].GetValueCount();
+			string value = $"uint{op0UintSize}({srcOps[0]}) ^ uint{op1UintSize}({srcOps[1]})";
+			string comment = CommentString(inst);
+			AppendLine($"{comment}{inst.destOperand} = {value};");
+		}
+
+		private void HandleLogicalNot(USILInstruction inst)
+		{
+			AppendLine($"{CommentString(inst)}{inst.destOperand} = !({inst.srcOperands[0]});");
 		}
 
 		private void HandleNot(USILInstruction inst)
@@ -433,104 +451,67 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 			AppendLine($"{comment}{inst.destOperand} = {value};");
 		}
 
-		private void HandleSample(USILInstruction inst)
-		{
-			List<USILOperand> srcOps = inst.srcOperands;
-			USILOperand textureOperand = srcOps[2];
-			int samplerTypeIdx = inst.instructionType == USILInstructionType.Sample ? 3 : 4;
-			bool samplerType = srcOps[samplerTypeIdx].immValueInt[0] == 1;
-			string args = $"{srcOps[2]}, {srcOps[0]}";
-			string value;
-			if (!samplerType)
-			{
-				value = textureOperand.operandType switch
-				{
-					USILOperandType.Sampler2D => $"tex2D({args})",
-					USILOperandType.Sampler3D => $"tex3D({args})",
-					USILOperandType.SamplerCube => $"texCUBE({args})",
-					USILOperandType.Sampler2DArray => $"UNITY_SAMPLE_TEX2DARRAY({args})",
-					USILOperandType.SamplerCubeArray => $"UNITY_SAMPLE_TEXCUBEARRAY({args})",
-					_ => $"texND({args})" // unknown real type
-				};
-			}
-			else
-			{
-				args = $"{srcOps[2]}, {args}";
-				value = textureOperand.operandType switch
-				{
-					USILOperandType.Sampler2D => $"UNITY_SAMPLE_TEX2D_SAMPLER({args})",
-					USILOperandType.Sampler3D => $"UNITY_SAMPLE_TEX3D_SAMPLER({args})",
-					USILOperandType.SamplerCube => $"UNITY_SAMPLE_TEXCUBE_SAMPLER({args})",
-					USILOperandType.Sampler2DArray => $"UNITY_SAMPLE_TEX2DARRAY_SAMPLER({args})",
-					USILOperandType.SamplerCubeArray => $"UNITY_SAMPLE_TEXCUBEARRAY_SAMPLER({args})",
-					_ => $"texND({args})" // unknown real type
-				};
-			}
-			string comment = CommentString(inst);
-			AppendLine($"{comment}{inst.destOperand} = {value};");
-		}
+        private static string TextureOffset(USILInstruction inst)
+        {
+            var values = inst.textureOffsets;
+            if (values.Length == 0) return "";
+            if (values.Length > 3 || values.Any(v => v < -8 || v > 7))
+                throw new InvalidDataException("Invalid original texture offset");
+            return values.Length == 1 ? ", " + values[0] :
+                ", int" + values.Length + "(" + string.Join(", ", values) + ")";
+        }
 
-		private void HandleSampleLOD(USILInstruction inst)
-		{
-			List<USILOperand> srcOps = inst.srcOperands;
-			USILOperand textureOperand = srcOps[2];
-			bool samplerType = srcOps[4].immValueInt[0] == 1;
-			string args;
-			if (srcOps[0].mask.Length == 2) // texture2d
-			{
-				args = $"{srcOps[2]}, float4({srcOps[0]}, 0, {srcOps[3]})";
-			}
-			else
-			{
-				args = $"{srcOps[2]}, float4({srcOps[0]}, {srcOps[3]})";
-			}
+        private static string TextureName(USILOperand operand)
+        {
+            if (!operand.metadataNameAssigned || string.IsNullOrEmpty(operand.metadataName))
+                throw new InvalidDataException("Texture/sampler binding metadata is missing: " + operand);
+            return operand.ToString(true);
+        }
 
-			string value;
-			if (!samplerType)
-			{
-				value = textureOperand.operandType switch
-				{
-					USILOperandType.Sampler2D => $"tex2Dlod({args})",
-					USILOperandType.Sampler3D => $"tex3Dlod({args})",
-					USILOperandType.SamplerCube => $"texCUBElod({args})",
-					USILOperandType.Sampler2DArray => $"UNITY_SAMPLE_TEX2DARRAY_LOD({args})",
-					USILOperandType.SamplerCubeArray => $"UNITY_SAMPLE_TEXCUBEARRAY_LOD({args})",
-					_ => $"texNDlod({args})" // unknown real type
-				};
-			}
-			else
-			{
-				args = $"{srcOps[2]}, {args}";
-				value = textureOperand.operandType switch
-				{
-					USILOperandType.Sampler2D => $"UNITY_SAMPLE_TEX2D_SAMPLER({args})",
-					USILOperandType.Sampler3D => $"UNITY_SAMPLE_TEX3D_SAMPLER({args})",
-					USILOperandType.SamplerCube => $"UNITY_SAMPLE_TEXCUBE_SAMPLER({args})",
-					USILOperandType.Sampler2DArray => $"UNITY_SAMPLE_TEX2DARRAY_SAMPLER({args})",
-					USILOperandType.SamplerCubeArray => $"UNITY_SAMPLE_TEXCUBEARRAY_SAMPLER({args})",
-					_ => $"texND({args})" // unknown real type
-				};
-			}
-			string comment = CommentString(inst);
-			AppendLine($"{comment}{inst.destOperand} = {value};");
-		}
+        private void EmitTextureResult(USILInstruction inst, string value, bool scalar = false)
+        {
+            // Resource swizzle is already composed with the destination write
+            // mask by DirectXProgramToUSIL. It describes the returned channels,
+            // not a swizzle to apply to the texture object or UV coordinates.
+            var mask = inst.srcOperands[1].mask;
+            if (mask.Length == 0 || mask.Length > 4 || mask.Any(v => v < 0 || v > 3))
+                throw new InvalidDataException("Invalid texture result mask");
+            if (scalar) {
+                if (mask.Length > 1) value = "float" + mask.Length + "(" +
+                    string.Join(", ", Enumerable.Repeat(value, mask.Length)) + ")";
+            } else value += "." + new string(mask.Select(v => "xyzw"[v]).ToArray());
+            AppendLine($"{CommentString(inst)}{inst.destOperand} = {WrapSaturate(inst, value)};");
+        }
 
-		private void HandleSampleDerivative(USILInstruction inst)
-		{
-			List<USILOperand> srcOps = inst.srcOperands;
-			USILOperand textureOperand = srcOps[2];
-			string value;
-			string args = $"{srcOps[2]}, {srcOps[0]}, {srcOps[3]}, {srcOps[4]}";
-			value = textureOperand.operandType switch
-			{
-				USILOperandType.Sampler2D => $"tex2Dgrad({args})",
-				USILOperandType.Sampler3D => $"tex3Dgrad({args})",
-				USILOperandType.SamplerCube => $"texCUBEgrad({args})",
-				_ => $"texNDgrad({args})" // unknown real type
-			};
-			string comment = CommentString(inst);
-			AppendLine($"{comment}{inst.destOperand} = {value};");
-		}
+        private void HandleSample(USILInstruction inst)
+        {
+            var operands = inst.srcOperands;
+            string texture = TextureName(operands[1]);
+            string sampler = "sampler" + TextureName(operands[2]);
+            bool comparison = inst.instructionType == USILInstructionType.SampleComparison ||
+                inst.instructionType == USILInstructionType.SampleComparisonLODZero;
+            string method = comparison ? (inst.instructionType == USILInstructionType.SampleComparisonLODZero ?
+                "SampleCmpLevelZero" : "SampleCmp") : "Sample";
+            string reference = comparison ? ", " + operands[3] : "";
+            EmitTextureResult(inst, $"{texture}.{method}({sampler}, {operands[0]}{reference}{TextureOffset(inst)})", comparison);
+        }
+
+        private void HandleSampleLOD(USILInstruction inst)
+        {
+            var operands = inst.srcOperands;
+            string texture = TextureName(operands[1]);
+            string sampler = "sampler" + TextureName(operands[2]);
+            string method = inst.instructionType == USILInstructionType.SampleLODBias ? "SampleBias" : "SampleLevel";
+            EmitTextureResult(inst, $"{texture}.{method}({sampler}, {operands[0]}, {operands[3]}{TextureOffset(inst)})");
+        }
+
+        private void HandleSampleDerivative(USILInstruction inst)
+        {
+            var operands = inst.srcOperands;
+            string texture = TextureName(operands[1]);
+            string sampler = "sampler" + TextureName(operands[2]);
+            EmitTextureResult(inst, $"{texture}.SampleGrad({sampler}, {operands[0]}, {operands[3]}, {operands[4]}{TextureOffset(inst)})");
+        }
 
 		private void HandleLoadResource(USILInstruction inst)
 		{

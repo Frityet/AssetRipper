@@ -128,6 +128,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 			}
 		}
 
+        private static string FormatFloat(float value) => float.IsFinite(value) ? value.ToString("0.0######", CultureInfo.InvariantCulture) : $"asfloat(0x{BitConverter.SingleToUInt32Bits(value):X8}u)";
+
 		public override string ToString()
 		{
 			return ToString(false);
@@ -241,7 +243,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 							{
 								// todo: check if number can't possibly be expressed as float and write in hex.
 								// todo: float precision isn't correct atm. add precision check somewhere.
-								body = $"{immValueFloat[0].ToString("0.0######", CultureInfo.InvariantCulture)}";
+								body = $"{FormatFloat(immValueFloat[0])}";
 							}
 							else //if (immValueFloat.Length > 1)
 							{
@@ -251,11 +253,11 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 								{
 									if (i != immValueFloat.Length - 1)
 									{
-										body += $"{immValueFloat[i].ToString("0.0######", CultureInfo.InvariantCulture)}, ";
+										body += $"{FormatFloat(immValueFloat[i])}, ";
 									}
 									else
 									{
-										body += $"{immValueFloat[i].ToString("0.0######", CultureInfo.InvariantCulture)}";
+										body += $"{FormatFloat(immValueFloat[i])}";
 									}
 								}
 								body += ")";

@@ -14,6 +14,7 @@ using AssetRipper.SourceGenerated.Subclasses.SerializedProperty;
 using AssetRipper.SourceGenerated.Subclasses.SerializedShader;
 using AssetRipper.SourceGenerated.Subclasses.SerializedShaderRTBlendState;
 using AssetRipper.SourceGenerated.Subclasses.SerializedShaderState;
+using AssetRipper.SourceGenerated.Subclasses.SerializedShaderFloatValue;
 using AssetRipper.SourceGenerated.Subclasses.SerializedStencilOp;
 using AssetRipper.SourceGenerated.Subclasses.SerializedSubProgram;
 using AssetRipper.SourceGenerated.Subclasses.SerializedSubShader;
@@ -24,6 +25,8 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 {
 	public static class SerializedExtensions
 	{
+        private static string StateExpression(ISerializedShaderFloatValue value, object fallback)
+            => value.HasPropertyReference() ? $"[{value.PropertyReferenceName()}]" : fallback.ToString()!;
 		public static void Export(this ISerializedPass _this, ShaderWriter writer)
 		{
 			writer.WriteIndent(2);
@@ -277,7 +280,7 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 
 		public static void Export(this ISerializedShaderRTBlendState _this, TextWriter writer, int index)
 		{
-			if (!_this.SrcBlendValue().IsOne() || !_this.DestBlendValue().IsZero() || !_this.SrcBlendAlphaValue().IsOne() || !_this.DestBlendAlphaValue().IsZero())
+			if (_this.SrcBlend.HasPropertyReference() || _this.DestBlend.HasPropertyReference() || _this.SrcBlendAlpha.HasPropertyReference() || _this.DestBlendAlpha.HasPropertyReference() || !_this.SrcBlendValue().IsOne() || !_this.DestBlendValue().IsZero() || !_this.SrcBlendAlphaValue().IsOne() || !_this.DestBlendAlphaValue().IsZero())
 			{
 				writer.WriteIndent(3);
 				writer.Write("Blend ");
@@ -285,15 +288,15 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 				{
 					writer.Write($"{index} ");
 				}
-				writer.Write($"{_this.SrcBlendValue()} {_this.DestBlendValue()}");
-				if (!_this.SrcBlendValue().IsOne() || !_this.DestBlendAlphaValue().IsZero())
+				writer.Write($"{StateExpression(_this.SrcBlend, _this.SrcBlendValue())} {StateExpression(_this.DestBlend, _this.DestBlendValue())}");
+				if (_this.SrcBlendAlpha.HasPropertyReference() || _this.DestBlendAlpha.HasPropertyReference() || _this.SrcBlendValue() != _this.SrcBlendAlphaValue() || _this.DestBlendValue() != _this.DestBlendAlphaValue())
 				{
-					writer.Write($", {_this.SrcBlendAlphaValue()} {_this.DestBlendAlphaValue()}");
+					writer.Write($", {StateExpression(_this.SrcBlendAlpha, _this.SrcBlendAlphaValue())} {StateExpression(_this.DestBlendAlpha, _this.DestBlendAlphaValue())}");
 				}
 				writer.Write('\n');
 			}
 
-			if (!_this.BlendOpValue().IsAdd() || !_this.BlendOpAlphaValue().IsAdd())
+			if (_this.BlendOp.HasPropertyReference() || _this.BlendOpAlpha.HasPropertyReference() || !_this.BlendOpValue().IsAdd() || !_this.BlendOpAlphaValue().IsAdd())
 			{
 				writer.WriteIndent(3);
 				writer.Write("BlendOp ");
@@ -301,19 +304,20 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 				{
 					writer.Write($"{index} ");
 				}
-				writer.Write(_this.BlendOpValue().ToString());
-				if (!_this.BlendOpAlphaValue().IsAdd())
+				writer.Write(StateExpression(_this.BlendOp, _this.BlendOpValue()));
+				if (_this.BlendOpAlpha.HasPropertyReference() || !_this.BlendOpAlphaValue().IsAdd())
 				{
-					writer.Write($", {_this.BlendOpAlphaValue()}");
+					writer.Write($", {StateExpression(_this.BlendOpAlpha, _this.BlendOpAlphaValue())}");
 				}
 				writer.Write('\n');
 			}
 
-			if (!_this.ColMaskValue().IsRBGA())
+			if (_this.ColMask.HasPropertyReference() || !_this.ColMaskValue().IsRBGA())
 			{
 				writer.WriteIndent(3);
 				writer.Write("ColorMask ");
-				if (_this.ColMaskValue().IsNone())
+				if (_this.ColMask.HasPropertyReference()) { writer.Write($"[{_this.ColMask.PropertyReferenceName()}]"); }
+                else if (_this.ColMaskValue().IsNone())
 				{
 					writer.Write(0);
 				}
@@ -366,10 +370,10 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 			_this.RtBlend6.Export(writer, 6);
 			_this.RtBlend7.Export(writer, 7);
 
-			if (_this.AlphaToMaskValue())
+			if (_this.AlphaToMask.HasPropertyReference() || _this.AlphaToMaskValue())
 			{
 				writer.WriteIndent(3);
-				writer.Write("AlphaToMask On\n");
+				writer.Write($"AlphaToMask {StateExpression(_this.AlphaToMask, "On")}\n");
 			}
 
 			if (!_this.ZClipValue().IsOn())
@@ -377,45 +381,45 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 				writer.WriteIndent(3);
 				writer.Write($"ZClip {_this.ZClipValue()}\n");
 			}
-			if (!_this.ZTestValue().IsLEqual() && !_this.ZTestValue().IsNone())
+			if (_this.ZTest.HasPropertyReference() || (!_this.ZTestValue().IsLEqual() && !_this.ZTestValue().IsNone()))
 			{
 				writer.WriteIndent(3);
-				writer.Write($"ZTest {_this.ZTestValue()}\n");
+				writer.Write($"ZTest {StateExpression(_this.ZTest, _this.ZTestValue())}\n");
 			}
-			if (!_this.ZWriteValue().IsOn())
+			if (_this.ZWrite.HasPropertyReference() || (!_this.ZWriteValue().IsOn()))
 			{
 				writer.WriteIndent(3);
-				writer.Write($"ZWrite {_this.ZWriteValue()}\n");
+				writer.Write($"ZWrite {StateExpression(_this.ZWrite, _this.ZWriteValue())}\n");
 			}
-			if (!_this.CullingValue().IsBack())
+			if (_this.Culling.HasPropertyReference() || (!_this.CullingValue().IsBack()))
 			{
 				writer.WriteIndent(3);
-				writer.Write($"Cull {_this.CullingValue()}\n");
+				writer.Write($"Cull {StateExpression(_this.Culling, _this.CullingValue())}\n");
 			}
-			if (!_this.OffsetFactor.IsZero() || !_this.OffsetUnits.IsZero())
+			if (_this.OffsetFactor.HasPropertyReference() || _this.OffsetUnits.HasPropertyReference() || !_this.OffsetFactor.IsZero() || !_this.OffsetUnits.IsZero())
 			{
 				writer.WriteIndent(3);
-				writer.Write($"Offset {_this.OffsetFactor.Val}, {_this.OffsetUnits.Val}\n");
+				writer.Write($"Offset {StateExpression(_this.OffsetFactor, _this.OffsetFactor.Val.ToStringInvariant())}, {StateExpression(_this.OffsetUnits, _this.OffsetUnits.Val.ToStringInvariant())}\n");
 			}
 
-			if (!_this.StencilRef.IsZero() || !_this.StencilReadMask.IsMax() || !_this.StencilWriteMask.IsMax() || !_this.StencilOp.IsDefault() || !_this.StencilOpFront.IsDefault() || !_this.StencilOpBack.IsDefault())
+			if (_this.StencilRef.HasPropertyReference() || _this.StencilReadMask.HasPropertyReference() || _this.StencilWriteMask.HasPropertyReference() || !_this.StencilRef.IsZero() || !_this.StencilReadMask.IsMax() || !_this.StencilWriteMask.IsMax() || !_this.StencilOp.IsDefault() || !_this.StencilOpFront.IsDefault() || !_this.StencilOpBack.IsDefault())
 			{
 				writer.WriteIndent(3);
 				writer.Write("Stencil {\n");
-				if (!_this.StencilRef.IsZero())
+				if (_this.StencilRef.HasPropertyReference() || !_this.StencilRef.IsZero())
 				{
 					writer.WriteIndent(4);
-					writer.Write($"Ref {_this.StencilRef.Val}\n");
+					writer.Write($"Ref {StateExpression(_this.StencilRef, _this.StencilRef.Val.ToStringInvariant())}\n");
 				}
-				if (!_this.StencilReadMask.IsMax())
+				if (_this.StencilReadMask.HasPropertyReference() || !_this.StencilReadMask.IsMax())
 				{
 					writer.WriteIndent(4);
-					writer.Write($"ReadMask {_this.StencilReadMask.Val}\n");
+					writer.Write($"ReadMask {StateExpression(_this.StencilReadMask, _this.StencilReadMask.Val.ToStringInvariant())}\n");
 				}
-				if (!_this.StencilWriteMask.IsMax())
+				if (_this.StencilWriteMask.HasPropertyReference() || !_this.StencilWriteMask.IsMax())
 				{
 					writer.WriteIndent(4);
-					writer.Write($"WriteMask {_this.StencilWriteMask.Val}\n");
+					writer.Write($"WriteMask {StateExpression(_this.StencilWriteMask, _this.StencilWriteMask.Val.ToStringInvariant())}\n");
 				}
 				if (!_this.StencilOp.IsDefault())
 				{
@@ -440,7 +444,7 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 				if (!_this.FogModeValue().IsUnknown())
 				{
 					writer.WriteIndent(4);
-					writer.Write($"Mode {_this.FogMode}\n");
+					writer.Write($"Mode {_this.FogModeValue()}\n");
 				}
 				if (!_this.FogColor.IsZero())
 				{
@@ -473,7 +477,8 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 		public static void Export(this ISerializedStencilOp _this, TextWriter writer, StencilType type)
 		{
 			writer.WriteIndent(4);
-			if (_this.CompValue() == StencilComp.Disabled)
+			if (_this.Comp.HasPropertyReference()) { writer.Write($"Comp{type.ToSuffixString()} [{_this.Comp.PropertyReferenceName()}]\n"); }
+            else if (_this.CompValue() == StencilComp.Disabled)
 			{
 				// When the value is set to 'Disabled', it indicates that this is the default value defined using Properties.
 				// https://github.com/AssetRipper/AssetRipper/pull/1337
@@ -484,11 +489,11 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 				writer.Write($"Comp{type.ToSuffixString()} {_this.CompValue()}\n");
 			}
 			writer.WriteIndent(4);
-			writer.Write($"Pass{type.ToSuffixString()} {_this.PassValue()}\n");
+			writer.Write($"Pass{type.ToSuffixString()} {StateExpression(_this.Pass, _this.PassValue())}\n");
 			writer.WriteIndent(4);
-			writer.Write($"Fail{type.ToSuffixString()} {_this.FailValue()}\n");
+			writer.Write($"Fail{type.ToSuffixString()} {StateExpression(_this.Fail, _this.FailValue())}\n");
 			writer.WriteIndent(4);
-			writer.Write($"ZFail{type.ToSuffixString()} {_this.ZFailValue()}\n");
+			writer.Write($"ZFail{type.ToSuffixString()} {StateExpression(_this.ZFail, _this.ZFailValue())}\n");
 		}
 
 		public static void Export(this ISerializedSubProgram _this, ShaderWriter writer, ShaderType type, bool isTier)

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisassembler.Blocks
 {
@@ -73,9 +73,9 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisasse
 				{
 					case ExtendedOpcodeType.SampleControls:
 						{
-							addrOffsetIU = (extOpcodeToken & 0x1e00) >> 9;
-							addrOffsetIV = (extOpcodeToken & 0x1e000) >> 13;
-							addrOffsetIW = (extOpcodeToken & 0x1e0000) >> 17;
+							addrOffsetIU = ((extOpcodeToken >> 9) & 15) - (((extOpcodeToken >> 9) & 8) << 1);
+							addrOffsetIV = ((extOpcodeToken >> 13) & 15) - (((extOpcodeToken >> 13) & 8) << 1);
+							addrOffsetIW = ((extOpcodeToken >> 17) & 15) - (((extOpcodeToken >> 17) & 8) << 1);
 							break;
 						}
 					case ExtendedOpcodeType.ResourceReturnType:

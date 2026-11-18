@@ -157,7 +157,7 @@ namespace AssetRipper.SourceGenerated.Extensions
 							{
 								byte[] buff = new byte[componentByteSize];
 								Buffer.BlockCopy(componentBytes, i * componentByteSize, buff, 0, componentByteSize);
-								buff = buff.Reverse().ToArray();
+								Array.Reverse(buff);
 								Buffer.BlockCopy(buff, 0, componentBytes, i * componentByteSize, componentByteSize);
 							}
 						}

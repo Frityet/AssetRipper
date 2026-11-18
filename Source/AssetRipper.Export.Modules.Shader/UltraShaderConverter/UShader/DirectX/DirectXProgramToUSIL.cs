@@ -1,4 +1,4 @@
-﻿using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisassembler;
+using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisassembler;
 using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisassembler.Blocks;
 using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Function;
 using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL;
@@ -44,6 +44,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 				{ Opcode.imad, new InstHandler(HandleMad) },
 				{ Opcode.and, new InstHandler(HandleAnd) },
 				{ Opcode.or, new InstHandler(HandleOr) },
+                { Opcode.xor, new InstHandler(HandleXor) },
+                { Opcode.ineg, new InstHandler(HandleIntegerNegate) },
 				{ Opcode.not, new InstHandler(HandleNot) },
 				{ Opcode.ftoi, new InstHandler(HandleFtoi) },
 				{ Opcode.ftou, new InstHandler(HandleFtoi) },
@@ -457,36 +459,16 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 
 		// there is a better way to check this, but this works too
 		private static int[] MapMask(int[] destMask, int[] srcMask)
-		{
-			if (srcMask == null || srcMask.Length == 0)
-			{
-				// immediates won't have a mask, so match them to destination values
-				return destMask;
-			}
-			else if (destMask == null || destMask.Length == 0 || destMask.Length == 4)
-			{
-				// 0 shouldn't happen, but with mask 4 (xyzw) don't worry about mapping mask
-				// some registers like OutputDepth don't have mask, so skip them too
-				return srcMask;
-			}
-			else if (destMask.Length == 1)
-			{
-				// with mask size 1, all inputs are also only size 1
-				return new int[] { srcMask[0] };
-			}
-			else //dest.mask.Length == (2 || 3)
-			{
-				// when mask size is 2 or 3, inputs will be size 4. map the masks correctly
-				int[] mask = new int[destMask.Length];
-				for (int i = 0; i < mask.Length; i++)
-				{
-					mask[i] = srcMask[destMask[i]];
-				}
-				return mask;
-			}
-		}
+        {
+            if (srcMask == null || srcMask.Length == 0) return destMask;
+            if (destMask == null || destMask.Length == 0) return srcMask;
+            // A scalar source selector is broadcast; a four-lane source
+            // swizzle is indexed by each destination lane, including .w.
+            if (srcMask.Length == 1) return Enumerable.Repeat(srcMask[0], destMask.Length).ToArray();
+            return destMask.Select(lane => srcMask[lane]).ToArray();
+        }
 
-		private void HandleMov(SHDRInstruction inst)
+        private void HandleMov(SHDRInstruction inst)
 		{
 			SHDRInstructionOperand dest = inst.operands[0];
 			SHDRInstructionOperand src0 = inst.operands[1];
@@ -762,6 +744,41 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			Instructions.Add(usilInst);
 		}
 
+		private void HandleXor(SHDRInstruction inst)
+		{
+			SHDRInstructionOperand dest = inst.operands[0]; // The result of the operation.
+			SHDRInstructionOperand src0 = inst.operands[1]; // The components to OR with src1.
+			SHDRInstructionOperand src1 = inst.operands[2]; // The components to OR with src0.
+
+			USILOperand usilDest = new();
+			USILOperand usilSrc0 = new();
+			USILOperand usilSrc1 = new();
+
+			FillUSILOperand(dest, usilDest, dest.swizzle, false);
+			FillUSILOperand(src0, usilSrc0, MapMask(dest.swizzle, src0.swizzle), false);
+			FillUSILOperand(src1, usilSrc1, MapMask(dest.swizzle, src1.swizzle), false);
+
+			USILInstruction usilInst = new()
+			{
+				instructionType = USILInstructionType.Xor,
+				destOperand = usilDest,
+				srcOperands = new()
+				{
+					usilSrc0,
+					usilSrc1,
+				},
+			};
+
+			Instructions.Add(usilInst);
+		}
+
+        private void HandleIntegerNegate(SHDRInstruction inst) {
+            var dest=new USILOperand();var src=new USILOperand();
+            FillUSILOperand(inst.operands[0],dest,inst.operands[0].swizzle,true);
+            FillUSILOperand(inst.operands[1],src,MapMask(inst.operands[0].swizzle,inst.operands[1].swizzle),true);
+            src.negative=!src.negative;
+            Instructions.Add(new USILInstruction{instructionType=USILInstructionType.Move,destOperand=dest,srcOperands=new(){src}});
+        }
 		private void HandleNot(SHDRInstruction inst)
 		{
 			SHDRInstructionOperand dest = inst.operands[0]; // The address of the result of the operation.
@@ -1236,8 +1253,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 
 			int[] mask = new int[] { 0, 1 };
 			FillUSILOperand(dest, usilDest, dest.swizzle, false);
-			FillUSILOperand(src0, usilSrc0, mask, false);
-			FillUSILOperand(src1, usilSrc1, mask, false);
+			FillUSILOperand(src0, usilSrc0, MapMask(mask, src0.swizzle), false);
+			FillUSILOperand(src1, usilSrc1, MapMask(mask, src1.swizzle), false);
 
 			USILInstruction usilInst = new()
 			{
@@ -1266,8 +1283,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 
 			int[] mask = new int[] { 0, 1, 2 };
 			FillUSILOperand(dest, usilDest, dest.swizzle, false);
-			FillUSILOperand(src0, usilSrc0, mask, false);
-			FillUSILOperand(src1, usilSrc1, mask, false);
+			FillUSILOperand(src0, usilSrc0, MapMask(mask, src0.swizzle), false);
+			FillUSILOperand(src1, usilSrc1, MapMask(mask, src1.swizzle), false);
 
 			USILInstruction usilInst = new()
 			{
@@ -1296,8 +1313,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 
 			int[] mask = new int[] { 0, 1, 2, 3 };
 			FillUSILOperand(dest, usilDest, dest.swizzle, false);
-			FillUSILOperand(src0, usilSrc0, mask, false);
-			FillUSILOperand(src1, usilSrc1, mask, false);
+			FillUSILOperand(src0, usilSrc0, MapMask(mask, src0.swizzle), false);
+			FillUSILOperand(src1, usilSrc1, MapMask(mask, src1.swizzle), false);
 
 			USILInstruction usilInst = new()
 			{
@@ -1341,6 +1358,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			{
 				instructionType = USILInstructionType.Sample,
 				destOperand = usilDest,
+                saturate = inst.saturated,
+                textureOffsets = SampleOffsets(inst, dimension),
 				srcOperands = new()
 				{
 					usilSrcAddress,
@@ -1377,7 +1396,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			FillUSILOperand(srcAddress, usilSrcAddress, MapMask(uvMask, srcAddress.swizzle), false);
 			FillUSILOperand(srcResource, usilSrcResource, MapMask(dest.swizzle, srcResource.swizzle), false);
 			FillUSILOperand(srcSampler, usilSrcSampler, mask, false);
-			FillUSILOperand(srcReferenceValue, usilSrcReferenceValue, mask, false);
+			FillUSILOperand(srcReferenceValue, usilSrcReferenceValue, new[] {srcReferenceValue.swizzle[0]}, false);
 
 			USILInstruction usilInst = new()
 			{
@@ -1388,6 +1407,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 					_ => USILInstructionType.SampleComparisonLODZero,//Throw exception?
 				},
 				destOperand = usilDest,
+                saturate = inst.saturated,
+                textureOffsets = SampleOffsets(inst, dimension),
 				srcOperands = new()
 				{
 					usilSrcAddress,
@@ -1436,6 +1457,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 					_ => USILInstructionType.SampleLOD, //Throw exception?
 				},
 				destOperand = usilDest,
+                saturate = inst.saturated,
+                textureOffsets = SampleOffsets(inst, dimension),
 				srcOperands = new()
 				{
 					usilSrcAddress,
@@ -1474,13 +1497,15 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			FillUSILOperand(srcAddress, usilSrcAddress, MapMask(uvMask, srcAddress.swizzle), false);
 			FillUSILOperand(srcResource, usilSrcResource, MapMask(dest.swizzle, srcResource.swizzle), false);
 			FillUSILOperand(srcSampler, usilSrcSampler, mask, false);
-			FillUSILOperand(srcXDerivatives, usilSrcXDerivatives, srcXDerivatives.swizzle, false);
-			FillUSILOperand(srcYDerivatives, usilSrcYDerivatives, srcYDerivatives.swizzle, false);
+			FillUSILOperand(srcXDerivatives, usilSrcXDerivatives, MapMask(GetSampleGradientMask(dimension), srcXDerivatives.swizzle), false);
+			FillUSILOperand(srcYDerivatives, usilSrcYDerivatives, MapMask(GetSampleGradientMask(dimension), srcYDerivatives.swizzle), false);
 
 			USILInstruction usilInst = new()
 			{
 				instructionType = USILInstructionType.SampleDerivative,
 				destOperand = usilDest,
+                saturate = inst.saturated,
+                textureOffsets = SampleOffsets(inst, dimension),
 				srcOperands = new()
 				{
 					usilSrcAddress,
@@ -2059,7 +2084,33 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			Locals.Add(new USILLocal(outputStructName, outputName, USILLocalType.Vector4));
 		}
 
-		private static int[] GetSampleLocationMask(ResourceDimension dimension)
+		private static int[] SampleOffsets(SHDRInstruction inst, ResourceDimension dimension)
+        {
+            int[] all = { inst.addrOffsetIU, inst.addrOffsetIV, inst.addrOffsetIW };
+            if (all.All(v => v == 0)) return Array.Empty<int>();
+            int count = dimension switch {
+                ResourceDimension.texture1d or ResourceDimension.texture1darray => 1,
+                ResourceDimension.texture2d or ResourceDimension.texture2darray => 2,
+                ResourceDimension.texture3d => 3,
+                _ => throw new NotSupportedException("Texel offsets on " + dimension)
+            };
+            if (all.Skip(count).Any(v => v != 0))
+                throw new InvalidDataException("Nonzero offset outside texture dimensions");
+            return all.Take(count).ToArray();
+        }
+
+        private static int[] GetSampleGradientMask(ResourceDimension dimension)
+        {
+            int count = dimension switch {
+                ResourceDimension.texture1d or ResourceDimension.texture1darray => 1,
+                ResourceDimension.texture2d or ResourceDimension.texture2darray => 2,
+                ResourceDimension.texture3d or ResourceDimension.texturecube or ResourceDimension.texturecubearray => 3,
+                _ => throw new NotSupportedException("Sample gradients on " + dimension)
+            };
+            return GetMaskOfSize(count);
+        }
+
+        private static int[] GetSampleLocationMask(ResourceDimension dimension)
 		{
 			switch (dimension)
 			{

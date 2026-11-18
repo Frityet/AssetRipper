@@ -47,7 +47,7 @@
 
 	<ItemGroup>
 		<None Remove="Shaders\Templates\*" />
-		<EmbeddedResource Include="Shaders\Templates\*" />
+		<EmbeddedResource Include="Shaders\Templates\*" LogicalName="AssetRipper.Export.UnityProjects.Shaders.Templates.%(Filename)%(Extension)" />
 	</ItemGroup>
 
 	<ItemGroup>

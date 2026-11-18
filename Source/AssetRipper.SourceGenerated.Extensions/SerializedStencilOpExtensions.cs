@@ -11,7 +11,9 @@ namespace AssetRipper.SourceGenerated.Extensions
 		public static StencilComp CompValue(this ISerializedStencilOp stencilOp) => (StencilComp)stencilOp.Comp.Val;
 		public static bool IsDefault(this ISerializedStencilOp stencilOp)
 		{
-			return stencilOp.PassValue().IsKeep()
+			return !stencilOp.Pass.HasPropertyReference() && !stencilOp.Fail.HasPropertyReference()
+                && !stencilOp.ZFail.HasPropertyReference() && !stencilOp.Comp.HasPropertyReference()
+                && stencilOp.PassValue().IsKeep()
 				&& stencilOp.FailValue().IsKeep()
 				&& stencilOp.ZFailValue().IsKeep()
 				&& stencilOp.CompValue().IsAlways();
