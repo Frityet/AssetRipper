@@ -193,3 +193,33 @@ conversions.operands[1] = TempLane(1, 0, 1, 2, 3);
 if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(shader, 1, out _, out _, out _))
     throw new Exception("Cross-register conversion was accepted");
 Console.WriteLine("PASS closed unsigned region, precision, uninitialized and alias rejection");
+
+// Output-only moves can cross a closed integer slice; a stale scratch lane
+// may be discarded only when a later straight-line instruction overwrites it.
+var input = Blank<SHDRInstructionOperand>(); input.operand = Operand.Input; input.arraySizes = [0]; input.swizzle = [0, 1, 0, 0]; input.subOperands = new SHDRInstructionOperand[1];
+var output = Blank<SHDRInstructionOperand>(); output.operand = Operand.Output; output.arraySizes = [0]; output.swizzle = [0, 1]; output.subOperands = new SHDRInstructionOperand[1];
+var moveOutput = Instruction(Opcode.mov, output, input);
+var convertMax = Instruction(Opcode.utof, z, z);
+var overwriteScratch = Instruction(Opcode.mov, TempLane(0, 0, 1), input);
+shader.shaderInstructions = [declarationInstruction, rawLoad0, rawLoad1, unsignedMax, moveOutput, convertMax, overwriteScratch];
+if (!DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(shader, 1, out _, out _, out _)) throw new Exception("Independent move and dead scratch were rejected");
+moveOutput.operands[1] = x;
+if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(shader, 1, out _, out _, out _)) throw new Exception("Move reading unsigned state accepted");
+moveOutput.operands[1] = input;
+overwriteScratch.operands[1] = y;
+if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(shader, 1, out _, out _, out _)) throw new Exception("Read before overwrite accepted");
+overwriteScratch.operands[1] = input;
+
+// Dynamic index plus unsigned increment and two-lane utof.
+var pairConvert = Instruction(Opcode.ftou, y, y);
+var pairAdd = Instruction(Opcode.iadd, z, y, ImmediateIndex(1));
+var pairLoad = Instruction(Opcode.ld_structured, y, y, zero, resource);
+var pairResult = Instruction(Opcode.utof, TempLane(0, 1, 2), TempLane(0, 1, 1, 2, 1));
+shader.shaderInstructions = [declarationInstruction, pairConvert, pairAdd, pairLoad, pairResult];
+if (!DirectXProgramToUSIL.IsDynamicUnsignedLoadPair(shader, 1, out _)) throw new Exception("Valid dynamic pair rejected");
+pairResult.operands[1] = TempLane(0, 1, 1, 1, 1);
+if (DirectXProgramToUSIL.IsDynamicUnsignedLoadPair(shader, 1, out _)) throw new Exception("Wrong pair source swizzle accepted");
+pairResult.operands[1] = TempLane(0, 1, 1, 2, 1);
+pairAdd.operands[2] = ImmediateIndex(2);
+if (DirectXProgramToUSIL.IsDynamicUnsignedLoadPair(shader, 1, out _)) throw new Exception("Wrong integer increment accepted");
+Console.WriteLine("PASS independent moves, dead scratch, dynamic pair and negative cases");

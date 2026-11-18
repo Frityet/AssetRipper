@@ -68,6 +68,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.LoadResource, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceMultisampled, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceStructured, new InstHandler(HandleLoadResourceStructured) },
+				{ USILInstructionType.DynamicUnsignedLoadPair, new InstHandler(HandleDynamicUnsignedLoadPair) },
 				{ USILInstructionType.ClosedUnsignedRegion, new InstHandler(HandleClosedUnsignedRegion) },
 				{ USILInstructionType.LoadStructuredUintToFloat, new InstHandler(HandleLoadStructuredUintToFloat) },
 				{ USILInstructionType.Discard, new InstHandler(HandleDiscard) },
@@ -532,6 +533,19 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 			string integerType = width == 1 ? "int" : "int" + width;
 			EmitTextureResult(inst, $"{TextureName(ops[1])}.Load({integerType}({ops[0]}){TextureOffset(inst)})");
 		}
+
+        private void HandleDynamicUnsignedLoadPair(USILInstruction inst)
+        {
+            string buffer = TextureName(inst.srcOperands[1]);
+            AppendLine("{");
+            AppendLine($"float nativeIndexFloat = {inst.srcOperands[0]};");
+            AppendLine("uint nativeIndex; if (isnan(nativeIndexFloat) || nativeIndexFloat <= 0.0) nativeIndex = 0u; else if (nativeIndexFloat >= 4294967296.0) nativeIndex = 0xffffffffu; else nativeIndex = (uint)nativeIndexFloat;");
+            AppendLine("uint nativeNext = nativeIndex + 1u;");
+            AppendLine($"uint nativeValue = NativeStructuredUintRaw{buffer}(nativeIndex);");
+            AppendLine($"{inst.destOperand} = (float)nativeValue;");
+            AppendLine($"{inst.srcOperands[2]} = (float)nativeNext;");
+            AppendLine("}");
+        }
 
         private void HandleClosedUnsignedRegion(USILInstruction inst)
         {

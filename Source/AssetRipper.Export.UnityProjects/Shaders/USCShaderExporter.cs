@@ -563,6 +563,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
             for (int i = 0; i < instructions.Count; i++)
             {
                 if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(dxShader.Shdr, i, out _, out int regionBinding, out int regionEnd)) { supportedBuffers.Add(regionBinding); i = regionEnd; continue; }
+                if (DirectXProgramToUSIL.IsDynamicUnsignedLoadPair(dxShader.Shdr, i, out int pairBinding)) { supportedBuffers.Add(pairBinding); i += 3; continue; }
                 if (i + 2 < instructions.Count && DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int binding))
                     supportedBuffers.Add(binding);
             }

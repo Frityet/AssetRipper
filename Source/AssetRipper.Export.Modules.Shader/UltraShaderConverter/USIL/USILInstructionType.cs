@@ -91,6 +91,7 @@
 		LoadResourceMultisampled, //dx: ld2dms
 		LoadResourceStructured, //dx: ld_structured
 		ClosedUnsignedRegion,
+		DynamicUnsignedLoadPair,
 		LoadStructuredUintToFloat, // proven ftou -> ld_structured -> utof scalar sequence
 
 		// artifical instructions
