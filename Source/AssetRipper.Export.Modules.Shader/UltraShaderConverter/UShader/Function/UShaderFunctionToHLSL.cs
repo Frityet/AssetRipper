@@ -64,6 +64,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.SampleLOD, new InstHandler(HandleSampleLOD) },
                 { USILInstructionType.SampleLODBias, new InstHandler(HandleSampleLOD) },
 				{ USILInstructionType.SampleDerivative, new InstHandler(HandleSampleDerivative) },
+				{ USILInstructionType.Gather, new InstHandler(HandleGather) },
 				{ USILInstructionType.LoadResource, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceMultisampled, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceStructured, new InstHandler(HandleLoadResourceStructured) },
@@ -513,13 +514,21 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
             EmitTextureResult(inst, $"{texture}.SampleGrad({sampler}, {operands[0]}, {operands[3]}, {operands[4]}{TextureOffset(inst)})");
         }
 
+		private void HandleGather(USILInstruction inst)
+		{
+			var ops = inst.srcOperands;
+			if (inst.gatherComponent < 0 || inst.gatherComponent > 3) throw new InvalidDataException("Invalid gather component");
+			string method = new[] { "GatherRed", "GatherGreen", "GatherBlue", "GatherAlpha" }[inst.gatherComponent];
+			EmitTextureResult(inst, $"{TextureName(ops[1])}.{method}(sampler{TextureName(ops[2])}, {ops[0]}{TextureOffset(inst)})");
+		}
+
 		private void HandleLoadResource(USILInstruction inst)
 		{
-			List<USILOperand> srcOps = inst.srcOperands;
-			string args = $"{srcOps[1]}, {srcOps[0]}";
-			string value = $"Load({args})";
-			string comment = CommentString(inst);
-			AppendLine($"{comment}{inst.destOperand} = {value};");
+			var ops = inst.srcOperands;
+			int width = ops[0].mask.Length;
+			if (width is < 1 or > 4) throw new InvalidDataException("Invalid load coordinate width");
+			string integerType = width == 1 ? "int" : "int" + width;
+			EmitTextureResult(inst, $"{TextureName(ops[1])}.Load({integerType}({ops[0]}){TextureOffset(inst)})");
 		}
 
 		private void HandleLoadResourceStructured(USILInstruction inst)

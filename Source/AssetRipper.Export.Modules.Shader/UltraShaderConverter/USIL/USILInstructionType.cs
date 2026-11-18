@@ -86,6 +86,7 @@
 		SampleComparisonLODZero, //dx: sample_c_lz
 		SampleLOD, //dx: sample_l
 		SampleDerivative, //dx: sample_d
+		Gather, //dx: gather4
 		LoadResource, //dx: ld
 		LoadResourceMultisampled, //dx: ld2dms
 		LoadResourceStructured, //dx: ld_structured

@@ -80,8 +80,9 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 				{ Opcode.sample_l, new InstHandler(HandleSampleL) },
 				{ Opcode.sample_b, new InstHandler(HandleSampleL) },
 				{ Opcode.sample_d, new InstHandler(HandleSampleD) },
+				{ Opcode.gather4, new InstHandler(HandleGather) },
 				{ Opcode.ld, new InstHandler(HandleLd) },
-				{ Opcode.ldms, new InstHandler(HandleLd) },
+				{ Opcode.ldms, new InstHandler(RejectMultisampledLoad) },
 				{ Opcode.ld_structured, new InstHandler(HandleLdStructured) },
 				{ Opcode.discard, new InstHandler(HandleDiscard) },
 				{ Opcode.resinfo, new InstHandler(HandleResInfo) },
@@ -1519,6 +1520,29 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			Instructions.Add(usilInst);
 		}
 
+		private void HandleGather(SHDRInstruction inst)
+		{
+			var dest = inst.operands[0]; var address = inst.operands[1];
+			var resource = inst.operands[2]; var sampler = inst.operands[3];
+			var dimension = _resourceToDimension[resource.arraySizes[0]];
+			if (dimension is not (ResourceDimension.texture2d or ResourceDimension.texture2darray or ResourceDimension.texturecube or ResourceDimension.texturecubearray))
+				throw new NotSupportedException("Gather on " + dimension);
+			if (sampler.swizzle.Length != 1 || sampler.swizzle[0] < 0 || sampler.swizzle[0] > 3)
+				throw new InvalidDataException("Gather sampler must select exactly one component.");
+			USILOperand dst = new(), uv = new(), tex = new(), samp = new();
+			FillUSILOperand(dest, dst, dest.swizzle, false);
+			FillUSILOperand(address, uv, MapMask(GetSampleLocationMask(dimension), address.swizzle), false);
+			FillUSILOperand(resource, tex, MapMask(dest.swizzle, resource.swizzle), false);
+			FillUSILOperand(sampler, samp, sampler.swizzle, false);
+			var operands = new List<USILOperand> { uv, tex, samp };
+			Instructions.Add(new USILInstruction { instructionType = USILInstructionType.Gather,
+				destOperand = dst, srcOperands = operands, gatherComponent = sampler.swizzle[0],
+				textureOffsets = SampleOffsets(inst, dimension), saturate = inst.saturated });
+		}
+
+		private void RejectMultisampledLoad(SHDRInstruction inst) =>
+			throw new NotSupportedException("Multisampled resource loads need an explicitly preserved sample index.");
+
 		private void HandleLd(SHDRInstruction inst)
 		{
 			SHDRInstructionOperand dest = inst.operands[0]; // The address of the result of the operation.
@@ -1530,6 +1554,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			USILOperand usilSrcResource = new();
 
 			ResourceDimension dimension = _resourceToDimension[srcResource.arraySizes[0]];
+			if (dimension is not (ResourceDimension.buffer or ResourceDimension.texture1d or ResourceDimension.texture1darray or ResourceDimension.texture2d or ResourceDimension.texture2darray or ResourceDimension.texture3d))
+				throw new NotSupportedException("Load on " + dimension);
 			int[] uvMask = GetLoadLocationMask(dimension);
 
 			FillUSILOperand(dest, usilDest, dest.swizzle, false);
@@ -1545,6 +1571,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 					_ => USILInstructionType.LoadResourceMultisampled,//Throw exception?
 				},
 				destOperand = usilDest,
+				textureOffsets = dimension == ResourceDimension.buffer ? Array.Empty<int>() : SampleOffsets(inst, dimension),
 				srcOperands = new() { usilSrcAddress, usilSrcResource },
 			};
 

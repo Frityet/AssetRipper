@@ -10,6 +10,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 		public bool saturate { get; set; }
         // Original signed texel-space offsets; never fold these into UVs.
         public int[] textureOffsets { get; set; } = Array.Empty<int>();
+        public int gatherComponent { get; set; }
 		public bool commented { get; set; }
 
 		public bool isIntVariant { get; set; }
@@ -75,6 +76,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
 				case USILInstructionType.SampleLODBias:
 				case USILInstructionType.SampleComparisonLODZero:
 				case USILInstructionType.SampleDerivative:
+				case USILInstructionType.Gather:
 					return true;
 				default:
 					return false;
