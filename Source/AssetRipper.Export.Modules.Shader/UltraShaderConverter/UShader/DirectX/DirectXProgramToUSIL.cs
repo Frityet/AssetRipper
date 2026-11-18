@@ -139,6 +139,11 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			for (int i = 0; i < instructions.Count; i++)
 			{
 				SHDRInstruction inst = instructions[i];
+				if (i + 2 < instructions.Count && TryFuseStructuredUintLoad(inst, instructions[i + 1], instructions[i + 2]))
+				{
+					i += 2;
+					continue;
+				}
 				if (_instructionHandlers.ContainsKey(inst.opcode))
 				{
 					_instructionHandlers[inst.opcode](inst);
@@ -1576,6 +1581,34 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			};
 
 			Instructions.Add(usilInst);
+		}
+
+		private bool TryFuseStructuredUintLoad(SHDRInstruction convert, SHDRInstruction load, SHDRInstruction result)
+		{
+			if (convert.opcode != Opcode.ftou || load.opcode != Opcode.ld_structured || result.opcode != Opcode.utof ||
+				convert.operands.Count != 2 || load.operands.Count != 4 || result.operands.Count != 2 ||
+				convert.saturated || load.saturated || result.saturated) return false;
+			static bool SameLane(SHDRInstructionOperand a, SHDRInstructionOperand b) =>
+				a.operand == Operand.Temp && b.operand == Operand.Temp && a.arraySizes.SequenceEqual(b.arraySizes) &&
+				a.swizzle.Length == 1 && b.swizzle.Length == 1 && a.swizzle[0] == b.swizzle[0] &&
+				!a.extended && !b.extended && a.subOperands.All(x => x is null) && b.subOperands.All(x => x is null);
+			var lane = convert.operands[0];
+			if (!SameLane(lane, load.operands[0]) || !SameLane(lane, load.operands[1]) ||
+				!SameLane(lane, result.operands[0]) || !SameLane(lane, result.operands[1]) ||
+				convert.operands[1].swizzle.Length != 1 ||
+				load.operands[2].operand != Operand.Immediate32 || load.operands[2].immValues.Length != 1 || load.operands[2].immValues[0] != 0 ||
+				load.operands[3].operand != Operand.Resource || load.operands[3].arraySizes.Length != 1 ||
+				load.operands[3].swizzle.Length != 4 || load.operands[3].swizzle.Any(x => x != 0)) return false;
+			int binding = load.operands[3].arraySizes[0];
+			var declarations = _dxShader.Shdr.shaderInstructions.Where(i => i.opcode == Opcode.dcl_resource_structured &&
+				i.declData?.operands.Length == 1 && i.declData.operands[0].arraySizes.SequenceEqual(new[] { binding })).ToArray();
+			if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) return false;
+			USILOperand dst = new(), address = new(), buffer = new();
+			FillUSILOperand(result.operands[0], dst, result.operands[0].swizzle, false);
+			FillUSILOperand(convert.operands[1], address, convert.operands[1].swizzle, false);
+			FillUSILOperand(load.operands[3], buffer, new[] { 0 }, false);
+			Instructions.Add(new USILInstruction { instructionType = USILInstructionType.LoadStructuredUintToFloat, destOperand = dst, srcOperands = new() { address, buffer } });
+			return true;
 		}
 
 		private void HandleLdStructured(SHDRInstruction inst)

@@ -521,6 +521,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisasse
 		public ResourceDimension resourceDimension;
 		public ConstantBufferType constantBufferType;
 		public int samplerIndex;
+		public int structuredStride;
 		public SamplerMode samplerMode;
 		public InterpolationMode interpolation;
 		public PrimitiveTopology outputPrimitiveTopology;
@@ -595,6 +596,14 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisasse
 						{
 						new SHDRInstructionOperand(reader)
 						};
+						break;
+					}
+				case Opcode.dcl_resource_structured:
+					{
+						operands = new[] { new SHDRInstructionOperand(reader) };
+						structuredStride = reader.ReadInt32();
+						if (structuredStride <= 0 || (structuredStride & 3) != 0)
+							throw new InvalidDataException("Invalid DXBC structured-buffer stride.");
 						break;
 					}
 				case Opcode.dcl_indexrange:

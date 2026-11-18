@@ -558,6 +558,24 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 		private static void ExportPassTextureParamDefinitions(ShaderSubProgram program, DirectXCompiledShader dxShader,
             ShaderWriter writer, HashSet<string?> declaredBufs, int depth)
         {
+            foreach (BufferBinding buffer in program.BufferParameters)
+            {
+                var declarations = dxShader.Shdr.shaderInstructions.Where(i => i.opcode == Opcode.dcl_resource_structured &&
+                    i.declData?.operands.Length == 1 && i.declData.operands[0].arraySizes.SequenceEqual(new[] { buffer.Index })).ToArray();
+                if (declarations.Length == 0) continue;
+                // Only scalar uint resources with the exact stride used by the
+                // supported fused instruction have a corresponding helper.
+                if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) continue;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(buffer.Name, @"^[A-Za-z_][A-Za-z0-9_]*$"))
+                    throw new InvalidDataException("Invalid structured buffer binding name.");
+                if (!declaredBufs.Add(buffer.Name)) continue;
+                writer.WriteIndent(depth); writer.WriteLine($"StructuredBuffer<uint> {buffer.Name};");
+                writer.WriteIndent(depth); writer.WriteLine($"int _NativeH3VRBufferCount{buffer.Name};");
+                writer.WriteIndent(depth); writer.WriteLine($"float NativeStructuredUintLoad{buffer.Name}(float v) {{");
+                writer.WriteIndent(depth + 1); writer.WriteLine("uint index; if (isnan(v) || v <= 0.0) index = 0u; else if (v >= 4294967296.0) index = 0xffffffffu; else index = (uint)v;");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"return _NativeH3VRBufferCount{buffer.Name} > 0 && index < (uint)_NativeH3VRBufferCount{buffer.Name} ? (float){buffer.Name}[index] : 0.0;");
+                writer.WriteIndent(depth); writer.WriteLine("}");
+            }
             foreach (TextureParameter param in program.TextureParameters)
             {
                 string name = param.Name;
