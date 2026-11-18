@@ -12,6 +12,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL
         public int[] textureOffsets { get; set; } = Array.Empty<int>();
         public int gatherComponent { get; set; }
 		public bool commented { get; set; }
+		public List<UnsignedRegionOperation>? unsignedRegion { get; set; }
 
 		public bool isIntVariant { get; set; }
 		public bool isIntUnsigned { get; set; }

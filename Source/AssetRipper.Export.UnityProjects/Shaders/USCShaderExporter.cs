@@ -560,9 +560,12 @@ namespace AssetRipper.Export.UnityProjects.Shaders
         {
             var supportedBuffers = new HashSet<int>();
             var instructions = dxShader.Shdr.shaderInstructions;
-            for (int i = 0; i + 2 < instructions.Count; i++)
-                if (DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int binding))
+            for (int i = 0; i < instructions.Count; i++)
+            {
+                if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(dxShader.Shdr, i, out _, out int regionBinding, out int regionEnd)) { supportedBuffers.Add(regionBinding); i = regionEnd; continue; }
+                if (i + 2 < instructions.Count && DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int binding))
                     supportedBuffers.Add(binding);
+            }
             foreach (BufferBinding buffer in program.BufferParameters)
             {
                 if (!supportedBuffers.Contains(buffer.Index)) continue;
@@ -573,8 +576,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
                 writer.WriteLine("#if defined(SHADER_API_METAL)");
                 writer.WriteIndent(depth); writer.WriteLine($"int _NativeH3VRBufferCount{buffer.Name};");
                 writer.WriteLine("#endif");
-                writer.WriteIndent(depth); writer.WriteLine($"float NativeStructuredUintLoad{buffer.Name}(float v) {{");
-                writer.WriteIndent(depth + 1); writer.WriteLine("uint index; if (isnan(v) || v <= 0.0) index = 0u; else if (v >= 4294967296.0) index = 0xffffffffu; else index = (uint)v;");
+                writer.WriteIndent(depth); writer.WriteLine($"uint NativeStructuredUintRaw{buffer.Name}(uint index) {{");
                 writer.WriteLine("#if defined(SHADER_API_METAL)");
                 writer.WriteIndent(depth + 1); writer.WriteLine($"uint count = (uint)max(_NativeH3VRBufferCount{buffer.Name}, 0);");
                 writer.WriteLine("#elif defined(SHADER_API_D3D11)");
@@ -584,8 +586,12 @@ namespace AssetRipper.Export.UnityProjects.Shaders
                 // early return. Clamp the actual load, then select zero. The host
                 // must bind at least a one-element fallback when count is zero.
                 writer.WriteIndent(depth + 1); writer.WriteLine("uint safeIndex = min(index, max(count, 1u) - 1u);");
-                writer.WriteIndent(depth + 1); writer.WriteLine($"float value = (float){buffer.Name}[safeIndex];");
-                writer.WriteIndent(depth + 1); writer.WriteLine("return index < count ? value : 0.0;");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"uint value = {buffer.Name}[safeIndex];");
+                writer.WriteIndent(depth + 1); writer.WriteLine("return index < count ? value : 0u;");
+                writer.WriteIndent(depth); writer.WriteLine("}");
+                writer.WriteIndent(depth); writer.WriteLine($"float NativeStructuredUintLoad{buffer.Name}(float v) {{");
+                writer.WriteIndent(depth + 1); writer.WriteLine("uint index; if (isnan(v) || v <= 0.0) index = 0u; else if (v >= 4294967296.0) index = 0xffffffffu; else index = (uint)v;");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"return (float)NativeStructuredUintRaw{buffer.Name}(index);");
                 writer.WriteIndent(depth); writer.WriteLine("}");
             }
             foreach (TextureParameter param in program.TextureParameters)
