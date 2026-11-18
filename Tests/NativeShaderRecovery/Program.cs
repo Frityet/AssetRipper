@@ -121,6 +121,47 @@ if (InvokeFusion(fuse, converter, ftou, structuredLoad, utof))
     throw new Exception("Nonzero byte offset was accepted");
 Console.WriteLine("PASS structured scalar fusion and fail-closed stride/offset checks");
 
+SHDRInstructionOperand Temp(params int[] swizzle)
+{
+    var operand = Blank<SHDRInstructionOperand>();
+    operand.operand = Operand.Temp;
+    operand.arraySizes = [0];
+    operand.swizzle = swizzle;
+    operand.subOperands = new SHDRInstructionOperand[1];
+    return operand;
+}
+declaration.structuredStride = 16;
+zero.immValues = [0];
+resource.swizzle = [0, 1, 2, 0];
+var vectorIndexLane = Temp(0);
+var vectorLanes = Temp(0, 1, 2);
+var vectorIndex = Instruction(Opcode.ftou, vectorIndexLane, vectorIndexLane);
+var vectorLoad = Instruction(Opcode.ld_structured, vectorLanes, vectorIndexLane, zero, resource);
+var vectorConvert = Instruction(Opcode.utof, vectorLanes, Temp(0, 1, 2, 0));
+if (!DirectXProgramToUSIL.IsSupportedStructuredUintLoad(shader, vectorIndex, vectorLoad, vectorConvert, out int binding, out int width)
+    || binding != 0 || width != 3 || !InvokeFusion(fuse, converter, vectorIndex, vectorLoad, vectorConvert))
+    throw new InvalidOperationException("A zero-offset xyz load from a stride-16 buffer was rejected.");
+resource.swizzle = [0, 2, 1, 0];
+if (InvokeFusion(fuse, converter, vectorIndex, vectorLoad, vectorConvert))
+    throw new InvalidOperationException("An unsupported resource swizzle was accepted.");
+resource.swizzle = [0, 1, 2, 0];
+vectorConvert.operands[1].swizzle = [1, 0, 2, 0];
+if (InvokeFusion(fuse, converter, vectorIndex, vectorLoad, vectorConvert))
+    throw new InvalidOperationException("A different converted output layout was accepted.");
+Console.WriteLine("PASS stride-16 structured vector reads require matching unsigned lanes");
+
+var roundTrip = converter.GetType().GetMethod("TryFuseUnsignedFloatRoundTrip", BindingFlags.Instance | BindingFlags.NonPublic)
+    ?? throw new InvalidOperationException("Unsigned round-trip fusion not found.");
+var lanes = Temp(0, 1);
+var roundDown = Instruction(Opcode.ftou, lanes, Temp(0, 1, 0, 0));
+var floatAgain = Instruction(Opcode.utof, lanes, Temp(0, 1, 0, 0));
+if (!(bool)roundTrip.Invoke(converter, [roundDown, floatAgain])!)
+    throw new InvalidOperationException("An exact two-lane round trip was rejected.");
+floatAgain.operands[1].swizzle = [1, 0, 0, 0];
+if ((bool)roundTrip.Invoke(converter, [roundDown, floatAgain])!)
+    throw new InvalidOperationException("A round trip with mismatched live lanes was accepted.");
+Console.WriteLine("PASS unsigned float round trip is restricted to the same lanes");
+
 // A minimal serialized declaration verifies the binary reader, not just the
 // higher-level instruction objects.
 using var declarationBytes = new MemoryStream();

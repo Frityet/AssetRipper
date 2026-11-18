@@ -69,6 +69,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.LoadResourceMultisampled, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceStructured, new InstHandler(HandleLoadResourceStructured) },
 				{ USILInstructionType.LoadStructuredUintToFloat, new InstHandler(HandleLoadStructuredUintToFloat) },
+				{ USILInstructionType.UnsignedFloatRoundTrip, new InstHandler(HandleUnsignedFloatRoundTrip) },
 				{ USILInstructionType.Discard, new InstHandler(HandleDiscard) },
 				{ USILInstructionType.ResourceDimensionInfo, new InstHandler(HandleResourceDimensionInfo) },
 				{ USILInstructionType.SampleCountInfo, new InstHandler(HandleSampleCountInfo) },
@@ -536,6 +537,16 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 		{
 			string buffer = TextureName(inst.srcOperands[1]);
 			AppendLine($"{CommentString(inst)}{inst.destOperand} = NativeStructuredUintLoad{buffer}({inst.srcOperands[0]});");
+		}
+
+		private void HandleUnsignedFloatRoundTrip(USILInstruction inst)
+		{
+			int width = inst.destOperand.mask.Length;
+			string type = width == 1 ? "float" : $"float{width}";
+			string value = inst.srcOperands[0].ToString();
+			// UINT_MAX rounds to 2^32 when the following instruction converts it
+			// back to float. Every finite float above 2^24 is already integral.
+			AppendLine($"{CommentString(inst)}{inst.destOperand} = floor(clamp(isnan({value}) ? ({type})0.0 : {value}, ({type})0.0, ({type})4294967296.0));");
 		}
 
 		private void HandleLoadResourceStructured(USILInstruction inst)

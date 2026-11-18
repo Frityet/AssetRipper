@@ -144,6 +144,11 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 					i += 2;
 					continue;
 				}
+				if (i + 1 < instructions.Count && TryFuseUnsignedFloatRoundTrip(inst, instructions[i + 1]))
+				{
+					i++;
+					continue;
+				}
 				if (_instructionHandlers.ContainsKey(inst.opcode))
 				{
 					_instructionHandlers[inst.opcode](inst);
@@ -1583,9 +1588,41 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			Instructions.Add(usilInst);
 		}
 
+		private bool TryFuseUnsignedFloatRoundTrip(SHDRInstruction first, SHDRInstruction second)
+		{
+			if (first.opcode != Opcode.ftou || second.opcode != Opcode.utof || first.saturated || second.saturated ||
+				first.operands.Count != 2 || second.operands.Count != 2)
+				return false;
+			var written = first.operands[0];
+			var value = first.operands[1];
+			var destination = second.operands[0];
+			var consumed = second.operands[1];
+			bool SameTemp(SHDRInstructionOperand operand) => operand.operand == Operand.Temp &&
+				operand.arraySizes.SequenceEqual(written.arraySizes) && !operand.extended &&
+				operand.subOperands.All(part => part is null);
+			if (written.arraySizes.Length != 1 || written.swizzle.Length is < 1 or > 4 ||
+				written.swizzle.Any(lane => lane is < 0 or > 3) || !SameTemp(written) ||
+				!SameTemp(destination) || !SameTemp(consumed) || !destination.swizzle.SequenceEqual(written.swizzle) ||
+				consumed.swizzle.Length is not (1 or 4) ||
+				!MapMask(destination.swizzle, consumed.swizzle).SequenceEqual(written.swizzle))
+				return false;
+
+			var output = new USILOperand();
+			var input = new USILOperand();
+			FillUSILOperand(destination, output, destination.swizzle, false);
+			FillUSILOperand(value, input, MapMask(written.swizzle, value.swizzle), false);
+			Instructions.Add(new()
+			{
+				instructionType = USILInstructionType.UnsignedFloatRoundTrip,
+				destOperand = output,
+				srcOperands = [input]
+			});
+			return true;
+		}
+
 		private bool TryFuseStructuredUintLoad(SHDRInstruction convert, SHDRInstruction load, SHDRInstruction result)
 		{
-			if (!IsSupportedStructuredUintLoad(_dxShader.Shdr, convert, load, result, out _)) return false;
+			if (!IsSupportedStructuredUintLoad(_dxShader.Shdr, convert, load, result, out _, out _)) return false;
 			USILOperand dst = new(), address = new(), buffer = new();
 			FillUSILOperand(result.operands[0], dst, result.operands[0].swizzle, false);
 			FillUSILOperand(convert.operands[1], address, convert.operands[1].swizzle, false);
@@ -1594,28 +1631,52 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			return true;
 		}
 
-		public static bool IsSupportedStructuredUintLoad(SHDR shader, SHDRInstruction convert, SHDRInstruction load, SHDRInstruction result, out int binding)
+		public static bool IsSupportedStructuredUintLoad(SHDR shader, SHDRInstruction convert, SHDRInstruction load, SHDRInstruction result, out int binding, out int width)
 		{
 			binding = -1;
+			width = 0;
 			if (convert.opcode != Opcode.ftou || load.opcode != Opcode.ld_structured || result.opcode != Opcode.utof ||
 				convert.operands.Count != 2 || load.operands.Count != 4 || result.operands.Count != 2 ||
 				convert.saturated || load.saturated || result.saturated) return false;
-			static bool SameLane(SHDRInstructionOperand a, SHDRInstructionOperand b) =>
-				a.operand == Operand.Temp && b.operand == Operand.Temp && a.arraySizes.SequenceEqual(b.arraySizes) &&
-				a.swizzle.Length == 1 && b.swizzle.Length == 1 && a.swizzle[0] == b.swizzle[0] &&
-				!a.extended && !b.extended && a.subOperands.All(x => x is null) && b.subOperands.All(x => x is null);
-			var lane = convert.operands[0];
-			if (!SameLane(lane, load.operands[0]) || !SameLane(lane, load.operands[1]) ||
-				!SameLane(lane, result.operands[0]) || !SameLane(lane, result.operands[1]) ||
+			var index = convert.operands[0];
+			var loaded = load.operands[0];
+			var address = load.operands[1];
+			var offset = load.operands[2];
+			var resource = load.operands[3];
+			var destination = result.operands[0];
+			var converted = result.operands[1];
+
+			bool SameTemp(SHDRInstructionOperand operand) =>
+				operand.operand == Operand.Temp && operand.arraySizes.SequenceEqual(index.arraySizes) &&
+				!operand.extended && operand.subOperands.All(part => part is null);
+			if (index.arraySizes.Length != 1 || !SameTemp(index) || !SameTemp(address) || !SameTemp(loaded) ||
+				!SameTemp(destination) || !SameTemp(converted) || converted.swizzle.Length is not (1 or 4) ||
+				index.swizzle.Length != 1 || index.swizzle[0] is < 0 or > 3 || !address.swizzle.SequenceEqual(index.swizzle) ||
+				!loaded.swizzle.Contains(index.swizzle[0]) || !destination.swizzle.SequenceEqual(loaded.swizzle) ||
 				convert.operands[1].swizzle.Length != 1 ||
-				load.operands[2].operand != Operand.Immediate32 || load.operands[2].immValues.Length != 1 || load.operands[2].immValues[0] != 0 ||
-				load.operands[3].operand != Operand.Resource || load.operands[3].arraySizes.Length != 1 ||
-				load.operands[3].swizzle.Length != 4 || load.operands[3].swizzle.Any(x => x != 0)) return false;
-			int candidate = load.operands[3].arraySizes[0];
+				offset.operand != Operand.Immediate32 || offset.immValues.Length != 1 ||
+				BitConverter.SingleToUInt32Bits((float)offset.immValues[0]) != 0 ||
+				resource.operand != Operand.Resource || resource.arraySizes.Length != 1 ||
+				resource.swizzle.Length != 4 || resource.extended || resource.subOperands.Any(part => part is not null))
+				return false;
+
+			// The complete typed conversion must consume exactly the words written
+			// by the load, including the lane previously used for the index.
+			int[] scalar = [index.swizzle[0]];
+			int[] xyz = [0, 1, 2];
+			bool readsScalar = loaded.swizzle.SequenceEqual(scalar) &&
+				MapMask(scalar, converted.swizzle).SequenceEqual(scalar) && resource.swizzle.All(word => word == 0);
+			bool readsPackedVector = loaded.swizzle.SequenceEqual(xyz) &&
+				MapMask(xyz, converted.swizzle).SequenceEqual(xyz) && MapMask(xyz, resource.swizzle).SequenceEqual(xyz);
+			int expectedStride = readsScalar ? 4 : readsPackedVector ? 16 : 0;
+			if (expectedStride == 0) return false;
+
+			int candidate = resource.arraySizes[0];
 			var declarations = shader.shaderInstructions.Where(i => i.opcode == Opcode.dcl_resource_structured &&
 				i.declData?.operands.Length == 1 && i.declData.operands[0].arraySizes.SequenceEqual(new[] { candidate })).ToArray();
-			if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) return false;
+			if (declarations.Length != 1 || declarations[0].declData!.structuredStride != expectedStride) return false;
 			binding = candidate;
+			width = loaded.swizzle.Length;
 			return true;
 		}
 
