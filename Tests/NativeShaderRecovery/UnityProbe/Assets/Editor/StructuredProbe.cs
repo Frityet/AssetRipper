@@ -34,6 +34,19 @@ public static class StructuredProbe
                 RenderTexture.active = target; read.ReadPixels(new Rect(0,0,1,1),0,0); read.Apply();
                 if (read.GetPixel(0,0).r != expected[i]) throw new Exception("Material readback mismatch " + i);
             }
+            var fallback = new ComputeBuffer(1, 4);
+            try
+            {
+                fallback.SetData(new uint[] { 0 });
+                material.SetBuffer("_Values", fallback);
+                material.SetInteger("_NativeH3VRBufferCount_Values", 0);
+                material.SetFloat("_Index", 4294967296f);
+                Graphics.Blit(Texture2D.whiteTexture, target, material, 0);
+                RenderTexture.active = target; read.ReadPixels(new Rect(0,0,1,1),0,0); read.Apply();
+                if (read.GetPixel(0,0).r != 0) throw new Exception("Fallback readback mismatch");
+                material.SetBuffer("_Values", buffer);
+            }
+            finally { fallback.Release(); }
             var block = new MaterialPropertyBlock();
             block.SetBuffer(Shader.PropertyToID("_Values"), buffer); block.SetFloat(Shader.PropertyToID("_Index"), 2f);
             material.SetInteger("_NativeH3VRBufferCount_Values", 0);

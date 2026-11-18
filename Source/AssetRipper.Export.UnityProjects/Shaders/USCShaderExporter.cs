@@ -558,22 +558,34 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 		private static void ExportPassTextureParamDefinitions(ShaderSubProgram program, DirectXCompiledShader dxShader,
             ShaderWriter writer, HashSet<string?> declaredBufs, int depth)
         {
+            var supportedBuffers = new HashSet<int>();
+            var instructions = dxShader.Shdr.shaderInstructions;
+            for (int i = 0; i + 2 < instructions.Count; i++)
+                if (DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int binding))
+                    supportedBuffers.Add(binding);
             foreach (BufferBinding buffer in program.BufferParameters)
             {
-                var declarations = dxShader.Shdr.shaderInstructions.Where(i => i.opcode == Opcode.dcl_resource_structured &&
-                    i.declData?.operands.Length == 1 && i.declData.operands[0].arraySizes.SequenceEqual(new[] { buffer.Index })).ToArray();
-                if (declarations.Length == 0) continue;
-                // Only scalar uint resources with the exact stride used by the
-                // supported fused instruction have a corresponding helper.
-                if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) continue;
+                if (!supportedBuffers.Contains(buffer.Index)) continue;
                 if (!System.Text.RegularExpressions.Regex.IsMatch(buffer.Name, @"^[A-Za-z_][A-Za-z0-9_]*$"))
                     throw new InvalidDataException("Invalid structured buffer binding name.");
                 if (!declaredBufs.Add(buffer.Name)) continue;
                 writer.WriteIndent(depth); writer.WriteLine($"StructuredBuffer<uint> {buffer.Name};");
+                writer.WriteLine("#if defined(SHADER_API_METAL)");
                 writer.WriteIndent(depth); writer.WriteLine($"int _NativeH3VRBufferCount{buffer.Name};");
+                writer.WriteLine("#endif");
                 writer.WriteIndent(depth); writer.WriteLine($"float NativeStructuredUintLoad{buffer.Name}(float v) {{");
                 writer.WriteIndent(depth + 1); writer.WriteLine("uint index; if (isnan(v) || v <= 0.0) index = 0u; else if (v >= 4294967296.0) index = 0xffffffffu; else index = (uint)v;");
-                writer.WriteIndent(depth + 1); writer.WriteLine($"return _NativeH3VRBufferCount{buffer.Name} > 0 && index < (uint)_NativeH3VRBufferCount{buffer.Name} ? (float){buffer.Name}[index] : 0.0;");
+                writer.WriteLine("#if defined(SHADER_API_METAL)");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"uint count = (uint)max(_NativeH3VRBufferCount{buffer.Name}, 0);");
+                writer.WriteLine("#elif defined(SHADER_API_D3D11)");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"uint count, stride; {buffer.Name}.GetDimensions(count, stride);");
+                writer.WriteLine("#else"); writer.WriteLine("#error Structured buffer bounds are unsupported on this shader backend"); writer.WriteLine("#endif");
+                // Unity 2021's Metal translator may speculate a load past an
+                // early return. Clamp the actual load, then select zero. The host
+                // must bind at least a one-element fallback when count is zero.
+                writer.WriteIndent(depth + 1); writer.WriteLine("uint safeIndex = min(index, max(count, 1u) - 1u);");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"float value = (float){buffer.Name}[safeIndex];");
+                writer.WriteIndent(depth + 1); writer.WriteLine("return index < count ? value : 0.0;");
                 writer.WriteIndent(depth); writer.WriteLine("}");
             }
             foreach (TextureParameter param in program.TextureParameters)

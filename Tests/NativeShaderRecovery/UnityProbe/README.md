@@ -11,3 +11,12 @@ It checks count-zero guarding, in/out-of-range indices, NaN, the large uint
 conversion boundary, and both Material and integer-ID MaterialPropertyBlock
 bindings through GPU readback. It contains no game input. This focused probe
 is not a stock-game or full shader semantic acceptance test.
+
+Unity 2021's Metal translator may speculate buffer reads across an early
+return. The generated helper clamps the actual read index and requires the
+host to bind a real buffer whose length is at least `max(count, 1)`, including
+a one-element fallback when the logical buffer is null. The helper returns zero
+for a zero count or an out-of-range logical index. The Metal compiler output
+must be inspected as well as readback: a zero result alone does not prove that
+an invalid read was avoided. D3D11 instead obtains the count from the buffer;
+other backends currently fail closed.
