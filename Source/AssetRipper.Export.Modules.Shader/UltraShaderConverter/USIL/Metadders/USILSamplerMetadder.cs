@@ -55,6 +55,12 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL.Metadders
 					}
 					else if (operand.operandType == USILOperandType.ResourceRegister)
 					{
+						if (instruction.instructionType == USILInstructionType.LoadStructuredUintToFloat)
+						{
+							var matches = shaderData.BufferParameters.Where(p => p.Index == operand.registerIndex).ToArray();
+							if (matches.Length != 1 || string.IsNullOrEmpty(matches[0].Name)) throw new InvalidDataException("Missing or ambiguous structured buffer binding.");
+							operand.metadataName = matches[0].Name; operand.metadataNameAssigned = true; continue;
+						}
 						TextureParameter? texParam = shaderData.TextureParameters.FirstOrDefault(
 							p => p.Index == operand.registerIndex
 						);

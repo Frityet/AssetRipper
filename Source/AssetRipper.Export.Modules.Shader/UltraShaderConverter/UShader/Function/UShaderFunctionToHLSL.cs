@@ -68,6 +68,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.LoadResource, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceMultisampled, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceStructured, new InstHandler(HandleLoadResourceStructured) },
+				{ USILInstructionType.LoadStructuredUintToFloat, new InstHandler(HandleLoadStructuredUintToFloat) },
 				{ USILInstructionType.Discard, new InstHandler(HandleDiscard) },
 				{ USILInstructionType.ResourceDimensionInfo, new InstHandler(HandleResourceDimensionInfo) },
 				{ USILInstructionType.SampleCountInfo, new InstHandler(HandleSampleCountInfo) },
@@ -545,6 +546,12 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 			if (width is < 1 or > 4) throw new InvalidDataException("Invalid load coordinate width");
 			string integerType = width == 1 ? "int" : "int" + width;
 			EmitTextureResult(inst, $"{TextureName(ops[1])}.Load({integerType}({ops[0]}){TextureOffset(inst)})");
+		}
+
+		private void HandleLoadStructuredUintToFloat(USILInstruction inst)
+		{
+			string buffer = TextureName(inst.srcOperands[1]);
+			AppendLine($"{CommentString(inst)}{inst.destOperand} = NativeStructuredUintLoad{buffer}({inst.srcOperands[0]});");
 		}
 
 		private void HandleLoadResourceStructured(USILInstruction inst)

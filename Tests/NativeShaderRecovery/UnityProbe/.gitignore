@@ -1,0 +1,10 @@
+/Library/
+/Logs/
+/Temp/
+/Obj/
+/UserSettings/
+/ProjectSettings/*
+!/ProjectSettings/ProjectVersion.txt
+/Packages/packages-lock.json
+/Assets/*.meta
+/Assets/**/*.meta
