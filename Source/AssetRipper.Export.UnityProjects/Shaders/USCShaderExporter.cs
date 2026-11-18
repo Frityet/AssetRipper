@@ -574,6 +574,12 @@ namespace AssetRipper.Export.UnityProjects.Shaders
                     i = regionEnd;
                     continue;
                 }
+                if (DirectXProgramToUSIL.IsDynamicUnsignedLoadPair(dxShader.Shdr, i, out int pairBinding))
+                {
+                    scalarBuffers.Add(pairBinding);
+                    i += 3;
+                    continue;
+                }
                 if (i + 2 < instructions.Count &&
                     DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int scalarBinding))
                 {

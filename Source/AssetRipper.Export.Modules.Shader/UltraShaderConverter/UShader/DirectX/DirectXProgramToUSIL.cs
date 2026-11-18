@@ -143,8 +143,21 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
                 {
                     var buffer = new USILOperand { operandType = USILOperandType.ResourceRegister, registerIndex = binding, mask = new[] { 0 } };
                     Instructions.Add(new USILInstruction { instructionType = USILInstructionType.ClosedUnsignedRegion, srcOperands = new() { buffer }, unsignedRegion = region });
+                    // The matcher admits only output moves that neither read nor write
+                    // region state. Their original order is preserved when hoisted.
+                    for (int j = i; j <= end; j++) if (instructions[j].opcode == Opcode.mov) HandleMov(instructions[j]);
                     i = end;
                     continue;
+                }
+				if (i + 3 < instructions.Count && IsDynamicUnsignedLoadPair(shdr, i, out int pairBinding))
+                {
+                    var value = new USILOperand(); var next = new USILOperand(); var input = new USILOperand();
+                    FillUSILOperand(instructions[i].operands[0], value, instructions[i].operands[0].swizzle, false);
+                    FillUSILOperand(instructions[i + 1].operands[0], next, instructions[i + 1].operands[0].swizzle, false);
+                    FillUSILOperand(instructions[i].operands[1], input, instructions[i].operands[1].swizzle, false);
+                    var buffer = new USILOperand { operandType = USILOperandType.ResourceRegister, registerIndex = pairBinding, mask = new[] { 0 } };
+                    Instructions.Add(new USILInstruction { instructionType = USILInstructionType.DynamicUnsignedLoadPair, destOperand = value, srcOperands = new() { input, buffer, next } });
+                    i += 3; continue;
                 }
 				if (i + 2 < instructions.Count && TryFuseStructuredUintLoad(inst, instructions[i + 1], instructions[i + 2]))
 				{
@@ -1637,16 +1650,81 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
                         var dst = (op[0].arraySizes[0], dl); live.Remove(dst);
                         result.Add(new("convert", dst.Item1, dl));
                     }
-                    if (live.Count == 0)
+                    if (live.Count == 0 || DeadBeforeRead(instructions, i + 1, live))
                     {
                         var declarations = instructions.Where(x => x.opcode == Opcode.dcl_resource_structured && x.declData?.operands.Length == 1 && x.declData.operands[0].arraySizes.SequenceEqual(new[] { resource })).ToArray();
                         if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) return false;
                         operations = result; binding = resource; end = i; return true;
                     }
                 }
+                else if (ins.opcode == Opcode.mov && op.Count == 2 && op[0].operand == Operand.Output && Plain(op[0]) &&
+                         op[0].arraySizes.Length == 1 && op[0].swizzle.Length > 0 && op[0].swizzle.Distinct().Count() == op[0].swizzle.Length && op[0].swizzle.All(x => x >= 0 && x < 4) &&
+                         (op[1].operand == Operand.Input || op[1].operand == Operand.Immediate32) && Plain(op[1]) &&
+                         (op[1].operand != Operand.Input || (op[1].arraySizes.Length == 1 && (op[1].swizzle.Length == 1 || op[1].swizzle.Length == 4) && op[1].swizzle.All(x => x >= 0 && x < 4))) &&
+                         (op[1].operand != Operand.Immediate32 || op[1].immValues.Length is 1 or 4))
+                {
+                    // Independent output write; emitted in order after the closed slice.
+                }
                 else return false;
             }
             return false;
+        }
+
+        private static bool DeadBeforeRead(List<SHDRInstruction> instructions, int start, HashSet<(int, int)> live)
+        {
+            var pending = new HashSet<(int, int)>(live);
+            for (int i = start; i < instructions.Count && pending.Count != 0; i++)
+            {
+                var ins = instructions[i];
+                // Limit proof to known straight-line, unpredicated operations with
+                // destination first; a branch or unfamiliar opcode declines it.
+                if (ins.opcode is not (Opcode.mov or Opcode.add or Opcode.div or Opcode.mad or Opcode.mul)) return false;
+                if (ins.operands.Count < 2) return false;
+                foreach (var operand in ins.operands.Skip(1))
+                {
+                    if (operand.subOperands != null && operand.subOperands.Any(x => x != null)) return false;
+                    if (operand.operand != Operand.Temp) continue;
+                    if (operand.extended || operand.arraySizes.Length != 1 || operand.swizzle.Length == 0) return false;
+                    // Treat every swizzle component as read, even unused ones.
+                    if (operand.swizzle.Any(lane => pending.Contains((operand.arraySizes[0], lane)))) return false;
+                }
+                var dst = ins.operands[0];
+                if (dst.operand == Operand.Temp)
+                {
+                    if (dst.extended || dst.arraySizes.Length != 1 || (dst.subOperands != null && dst.subOperands.Any(x => x != null))) return false;
+                    foreach (int lane in dst.swizzle) pending.Remove((dst.arraySizes[0], lane));
+                }
+            }
+            return pending.Count == 0;
+        }
+
+        public static bool IsDynamicUnsignedLoadPair(SHDR shader, int start, out int binding)
+        {
+            binding = -1;
+            var ins = shader.shaderInstructions;
+            if (start < 0 || start + 3 >= ins.Count) return false;
+            var a = ins[start]; var b = ins[start + 1]; var c = ins[start + 2]; var d = ins[start + 3];
+            if (a.opcode != Opcode.ftou || b.opcode != Opcode.iadd || c.opcode != Opcode.ld_structured || d.opcode != Opcode.utof ||
+                a.saturated || b.saturated || c.saturated || d.saturated || a.operands.Count != 2 || b.operands.Count != 3 || c.operands.Count != 4 || d.operands.Count != 2) return false;
+            static bool Plain(SHDRInstructionOperand x) => !x.extended && (x.subOperands == null || x.subOperands.All(y => y == null));
+            static bool Temp(SHDRInstructionOperand x) => x.operand == Operand.Temp && x.arraySizes.Length == 1 && x.arraySizes[0] >= 0 && x.swizzle.Length == 1 && x.swizzle[0] is >= 0 and < 4 && Plain(x);
+            static bool Same(SHDRInstructionOperand x, SHDRInstructionOperand y) => Temp(x) && Temp(y) && x.arraySizes[0] == y.arraySizes[0] && x.swizzle[0] == y.swizzle[0];
+            var lane = a.operands[0]; var next = b.operands[0];
+            if (!Same(lane, a.operands[1]) || !Same(lane, b.operands[1]) || !Same(lane, c.operands[0]) || !Same(lane, c.operands[1]) ||
+                !Temp(next) || next.arraySizes[0] != lane.arraySizes[0] || next.swizzle[0] == lane.swizzle[0]) return false;
+            var one = b.operands[2]; var offset = c.operands[2]; var res = c.operands[3];
+            if (one.operand != Operand.Immediate32 || one.immValues.Length != 1 || !Plain(one) || BitConverter.SingleToInt32Bits((float)one.immValues[0]) != 1 ||
+                offset.operand != Operand.Immediate32 || offset.immValues.Length != 1 || offset.immValues[0] != 0 || !Plain(offset) ||
+                res.operand != Operand.Resource || !Plain(res) || res.arraySizes.Length != 1 || !res.swizzle.SequenceEqual(new[] { 0, 0, 0, 0 })) return false;
+            var dst = d.operands[0]; var src = d.operands[1];
+            if (dst.operand != Operand.Temp || src.operand != Operand.Temp || !Plain(dst) || !Plain(src) ||
+                dst.arraySizes.Length != 1 || src.arraySizes.Length != 1 || dst.arraySizes[0] != lane.arraySizes[0] || src.arraySizes[0] != lane.arraySizes[0] ||
+                dst.swizzle.Length != 2 || !dst.swizzle.SequenceEqual(new[] { lane.swizzle[0], next.swizzle[0] }.OrderBy(x => x)) ||
+                src.swizzle.Length != 4 || dst.swizzle.Any(x => src.swizzle[x] != x)) return false;
+            int candidate = res.arraySizes[0];
+            var declarations = ins.Where(x => x.opcode == Opcode.dcl_resource_structured && x.declData?.operands.Length == 1 && x.declData.operands[0].arraySizes.SequenceEqual(new[] { candidate })).ToArray();
+            if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) return false;
+            binding = candidate; return true;
         }
 
 		private bool TryFuseStructuredUintLoad(SHDRInstruction convert, SHDRInstruction load, SHDRInstruction result)
