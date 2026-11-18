@@ -72,6 +72,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.ClosedUnsignedRegion, new InstHandler(HandleClosedUnsignedRegion) },
 				{ USILInstructionType.LoadStructuredUintToFloat, new InstHandler(HandleLoadStructuredUintToFloat) },
 				{ USILInstructionType.LoadStructuredWords3, new InstHandler(HandleLoadStructuredWords3) },
+				{ USILInstructionType.UnsignedFloatRoundTrip, new InstHandler(HandleUnsignedFloatRoundTrip) },
 				{ USILInstructionType.Discard, new InstHandler(HandleDiscard) },
 				{ USILInstructionType.ResourceDimensionInfo, new InstHandler(HandleResourceDimensionInfo) },
 				{ USILInstructionType.SampleCountInfo, new InstHandler(HandleSampleCountInfo) },
@@ -593,6 +594,17 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 		{
 			string buffer = TextureName(inst.srcOperands[1]);
 			AppendLine($"{CommentString(inst)}{inst.destOperand} = NativeStructuredWords3Load{buffer}({inst.srcOperands[0]});");
+		}
+
+		private void HandleUnsignedFloatRoundTrip(USILInstruction inst)
+		{
+			var destination = inst.destOperand ?? throw new InvalidDataException("Unsigned round trip is missing its destination.");
+			int width = destination.mask.Length;
+			string type = width == 1 ? "float" : $"float{width}";
+			string value = inst.srcOperands[0].ToString();
+			// UINT_MAX rounds to 2^32 when the following instruction converts it
+			// back to float. Every finite float above 2^24 is already integral.
+			AppendLine($"{CommentString(inst)}{destination} = floor(clamp(isnan({value}) ? ({type})0.0 : {value}, ({type})0.0, ({type})4294967296.0));");
 		}
 
 		private void HandleLoadResourceStructured(USILInstruction inst)

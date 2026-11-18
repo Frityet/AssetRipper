@@ -92,8 +92,9 @@
 		LoadResourceStructured, //dx: ld_structured
 		ClosedUnsignedRegion,
 		DynamicUnsignedLoadPair,
-		LoadStructuredUintToFloat, // proven ftou -> ld_structured -> utof scalar sequence
+		LoadStructuredUintToFloat, // verified unsigned structured reads followed by utof
 		LoadStructuredWords3, // 12-byte SRV element indexed by SV_VertexID
+		UnsignedFloatRoundTrip, // consecutive ftou -> utof in the same lanes
 
 		// artifical instructions
 		GetDimensions, //dx: --- (resinfo/sampleinfo)

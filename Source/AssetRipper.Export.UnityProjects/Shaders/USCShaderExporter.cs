@@ -563,27 +563,27 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 		private static void ExportPassTextureParamDefinitions(ShaderSubProgram program, DirectXCompiledShader dxShader,
             ShaderWriter writer, HashSet<string?> declaredBufs, int depth)
         {
-            var scalarBuffers = new HashSet<int>();
+            var unsignedBuffers = new Dictionary<int, int>();
             var vertexBuffers = new HashSet<int>();
             var instructions = dxShader.Shdr.shaderInstructions;
             for (int i = 0; i < instructions.Count; i++)
             {
                 if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(dxShader.Shdr, i, out _, out int regionBinding, out int regionEnd))
                 {
-                    scalarBuffers.Add(regionBinding);
+                    unsignedBuffers[regionBinding] = 1;
                     i = regionEnd;
                     continue;
                 }
                 if (DirectXProgramToUSIL.IsDynamicUnsignedLoadPair(dxShader.Shdr, i, out int pairBinding))
                 {
-                    scalarBuffers.Add(pairBinding);
+                    unsignedBuffers[pairBinding] = 1;
                     i += 3;
                     continue;
                 }
                 if (i + 2 < instructions.Count &&
-                    DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int scalarBinding))
+                    DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int binding, out int width))
                 {
-                    scalarBuffers.Add(scalarBinding);
+                    unsignedBuffers[binding] = width;
                 }
                 if (DirectXProgramToUSIL.IsSupportedStructuredVertexLoad(dxShader, instructions[i], out int vertexBinding))
                 {
@@ -593,7 +593,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
             foreach (BufferBinding buffer in program.BufferParameters)
             {
                 bool vertexBuffer = vertexBuffers.Contains(buffer.Index);
-                if (!vertexBuffer && !scalarBuffers.Contains(buffer.Index)) continue;
+                if (!unsignedBuffers.TryGetValue(buffer.Index, out int width) && !vertexBuffer) continue;
                 if (!System.Text.RegularExpressions.Regex.IsMatch(buffer.Name, @"^[A-Za-z_][A-Za-z0-9_]*$"))
                     throw new InvalidDataException("Invalid structured buffer binding name.");
                 if (!declaredBufs.Add(buffer.Name)) continue;
@@ -602,11 +602,15 @@ namespace AssetRipper.Export.UnityProjects.Shaders
                     ExportStructuredWords3Buffer(buffer.Name, writer, depth);
                     continue;
                 }
-                writer.WriteIndent(depth); writer.WriteLine($"StructuredBuffer<uint> {buffer.Name};");
+                string elementType = width == 1 ? "uint" : "uint4";
+                string rawType = width == 1 ? "uint" : "uint3";
+                string resultType = width == 1 ? "float" : "float3";
+                string components = width == 1 ? "" : ".xyz";
+                writer.WriteIndent(depth); writer.WriteLine($"StructuredBuffer<{elementType}> {buffer.Name};");
                 writer.WriteLine("#if defined(SHADER_API_METAL)");
                 writer.WriteIndent(depth); writer.WriteLine($"int _NativeH3VRBufferCount{buffer.Name};");
                 writer.WriteLine("#endif");
-                writer.WriteIndent(depth); writer.WriteLine($"uint NativeStructuredUintRaw{buffer.Name}(uint index) {{");
+                writer.WriteIndent(depth); writer.WriteLine($"{rawType} NativeStructuredUintRaw{buffer.Name}(uint index) {{");
                 writer.WriteLine("#if defined(SHADER_API_METAL)");
                 writer.WriteIndent(depth + 1); writer.WriteLine($"uint count = (uint)max(_NativeH3VRBufferCount{buffer.Name}, 0);");
                 writer.WriteLine("#elif defined(SHADER_API_D3D11)");
@@ -616,12 +620,12 @@ namespace AssetRipper.Export.UnityProjects.Shaders
                 // early return. Clamp the actual load, then select zero. The host
                 // must bind at least a one-element fallback when count is zero.
                 writer.WriteIndent(depth + 1); writer.WriteLine("uint safeIndex = min(index, max(count, 1u) - 1u);");
-                writer.WriteIndent(depth + 1); writer.WriteLine($"uint value = {buffer.Name}[safeIndex];");
-                writer.WriteIndent(depth + 1); writer.WriteLine("return index < count ? value : 0u;");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"{rawType} value = {buffer.Name}[safeIndex]{components};");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"return index < count ? value : ({rawType})0;");
                 writer.WriteIndent(depth); writer.WriteLine("}");
-                writer.WriteIndent(depth); writer.WriteLine($"float NativeStructuredUintLoad{buffer.Name}(float v) {{");
+                writer.WriteIndent(depth); writer.WriteLine($"{resultType} NativeStructuredUintLoad{buffer.Name}(float v) {{");
                 writer.WriteIndent(depth + 1); writer.WriteLine("uint index; if (isnan(v) || v <= 0.0) index = 0u; else if (v >= 4294967296.0) index = 0xffffffffu; else index = (uint)v;");
-                writer.WriteIndent(depth + 1); writer.WriteLine($"return (float)NativeStructuredUintRaw{buffer.Name}(index);");
+                writer.WriteIndent(depth + 1); writer.WriteLine($"return ({resultType})NativeStructuredUintRaw{buffer.Name}(index);");
                 writer.WriteIndent(depth); writer.WriteLine("}");
             }
             foreach (TextureParameter param in program.TextureParameters)
