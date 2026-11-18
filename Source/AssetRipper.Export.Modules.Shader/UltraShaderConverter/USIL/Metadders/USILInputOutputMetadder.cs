@@ -69,7 +69,12 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL.Metadders
 				// correct mask
 				operand.mask = MatchMaskToInputOutput(operand.mask, input.mask, true);
 
-				if (shader.shaderFunctionType == UShaderFunctionType.Fragment && input.type == "SV_IsFrontFace")
+				if (shader.shaderFunctionType == UShaderFunctionType.Vertex && input.isVertexId)
+				{
+					operand.metadataName = USILConstants.VERTEX_ID_INPUT_NAME;
+					operand.displayMask = operand.mask.Length > 1;
+				}
+				else if (shader.shaderFunctionType == UShaderFunctionType.Fragment && input.type == "SV_IsFrontFace")
 				{
 					operand.metadataName = input.name;
 				}

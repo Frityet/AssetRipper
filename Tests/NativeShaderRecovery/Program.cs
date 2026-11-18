@@ -140,3 +140,5 @@ var parsedDeclaration = parsed.shaderInstructions.Single().declData!;
 if (parsedDeclaration.structuredStride != 16 || parsedDeclaration.operands.Single().arraySizes.Single() != 3)
     throw new Exception("Structured DXBC declaration lost resource index or stride");
 Console.WriteLine("PASS synthetic DXBC structured declaration retains resource index and stride");
+
+StructuredVertexLoadTest.Run();

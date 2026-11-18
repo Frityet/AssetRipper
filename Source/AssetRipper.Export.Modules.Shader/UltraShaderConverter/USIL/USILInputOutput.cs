@@ -7,5 +7,6 @@
 		public int register;
 		public int mask;
 		public bool isOutput;
+		public bool isVertexId;
 	}
 }

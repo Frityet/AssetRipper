@@ -29,6 +29,26 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisasse
 				shaderInstructions.Add(inst);
 			}
 		}
+
+		public int? GetStructuredResourceStride(int register)
+		{
+			int? stride = null;
+			foreach (var instruction in shaderInstructions)
+			{
+				if (instruction.opcode != Opcode.dcl_resource_structured ||
+					instruction.declData is not { operands: [{ operand: Operand.Resource, arraySizes: [int binding] }] } declaration ||
+					binding != register)
+				{
+					continue;
+				}
+				if (stride.HasValue)
+				{
+					return null;
+				}
+				stride = declaration.structuredStride;
+			}
+			return stride;
+		}
 	}
 	public class SHDRInstruction
 	{

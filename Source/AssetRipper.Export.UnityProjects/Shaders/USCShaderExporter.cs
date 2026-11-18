@@ -414,7 +414,12 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 						writer.WriteLine($"// Keywords: {keywordsList}");
 
 						writer.WriteIndent(3);
-						writer.WriteLine($"{USILConstants.VERT_TO_FRAG_STRUCT_NAME} vert(appdata_full {USILConstants.VERT_INPUT_NAME})");
+						string args = $"appdata_full {USILConstants.VERT_INPUT_NAME}";
+						if (vertexConverter!.DxShader!.Isgn.inputs.Any(input => input.IsVertexId))
+						{
+							args += $", uint {USILConstants.VERTEX_ID_INPUT_NAME} : SV_VertexID";
+						}
+						writer.WriteLine($"{USILConstants.VERT_TO_FRAG_STRUCT_NAME} vert({args})");
 						writer.WriteIndent(3);
 						writer.WriteLine("{");
 
@@ -558,17 +563,33 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 		private static void ExportPassTextureParamDefinitions(ShaderSubProgram program, DirectXCompiledShader dxShader,
             ShaderWriter writer, HashSet<string?> declaredBufs, int depth)
         {
-            var supportedBuffers = new HashSet<int>();
+            var scalarBuffers = new HashSet<int>();
+            var vertexBuffers = new HashSet<int>();
             var instructions = dxShader.Shdr.shaderInstructions;
-            for (int i = 0; i + 2 < instructions.Count; i++)
-                if (DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int binding))
-                    supportedBuffers.Add(binding);
+            for (int i = 0; i < instructions.Count; i++)
+            {
+                if (i + 2 < instructions.Count &&
+                    DirectXProgramToUSIL.IsSupportedStructuredUintLoad(dxShader.Shdr, instructions[i], instructions[i + 1], instructions[i + 2], out int scalarBinding))
+                {
+                    scalarBuffers.Add(scalarBinding);
+                }
+                if (DirectXProgramToUSIL.IsSupportedStructuredVertexLoad(dxShader, instructions[i], out int vertexBinding))
+                {
+                    vertexBuffers.Add(vertexBinding);
+                }
+            }
             foreach (BufferBinding buffer in program.BufferParameters)
             {
-                if (!supportedBuffers.Contains(buffer.Index)) continue;
+                bool vertexBuffer = vertexBuffers.Contains(buffer.Index);
+                if (!vertexBuffer && !scalarBuffers.Contains(buffer.Index)) continue;
                 if (!System.Text.RegularExpressions.Regex.IsMatch(buffer.Name, @"^[A-Za-z_][A-Za-z0-9_]*$"))
                     throw new InvalidDataException("Invalid structured buffer binding name.");
                 if (!declaredBufs.Add(buffer.Name)) continue;
+                if (vertexBuffer)
+                {
+                    ExportStructuredWords3Buffer(buffer.Name, writer, depth);
+                    continue;
+                }
                 writer.WriteIndent(depth); writer.WriteLine($"StructuredBuffer<uint> {buffer.Name};");
                 writer.WriteLine("#if defined(SHADER_API_METAL)");
                 writer.WriteIndent(depth); writer.WriteLine($"int _NativeH3VRBufferCount{buffer.Name};");
@@ -606,6 +627,29 @@ namespace AssetRipper.Export.UnityProjects.Shaders
                 }
                 declaredBufs.Add(name);
             }
+        }
+
+        private static void ExportStructuredWords3Buffer(string name, ShaderWriter writer, int depth)
+        {
+            string element = $"NativeStructuredWords3{name}";
+            string count = $"_NativeH3VRBufferCount{name}";
+            // Metal aligns a uint3 member to 16 bytes. Three scalar words keep the DXBC stride.
+            writer.WriteIndent(depth); writer.WriteLine($"struct {element} {{ uint x; uint y; uint z; }};");
+            writer.WriteIndent(depth); writer.WriteLine($"StructuredBuffer<{element}> {name};");
+            writer.WriteLine("#if defined(SHADER_API_METAL)");
+            writer.WriteIndent(depth); writer.WriteLine($"int {count};");
+            writer.WriteLine("#endif");
+            writer.WriteIndent(depth); writer.WriteLine($"float3 NativeStructuredWords3Load{name}(uint index) {{");
+            writer.WriteLine("#if defined(SHADER_API_METAL)");
+            writer.WriteIndent(depth + 1); writer.WriteLine($"uint count = (uint)max({count}, 0);");
+            writer.WriteLine("#elif defined(SHADER_API_D3D11)");
+            writer.WriteIndent(depth + 1); writer.WriteLine($"uint count, stride; {name}.GetDimensions(count, stride);");
+            writer.WriteLine("#else"); writer.WriteLine("#error Structured buffer bounds are unsupported on this shader backend"); writer.WriteLine("#endif");
+            // Clamp the issued load even when HLSLcc evaluates it before the bounds predicate.
+            writer.WriteIndent(depth + 1); writer.WriteLine("uint safeIndex = min(index, max(count, 1u) - 1u);");
+            writer.WriteIndent(depth + 1); writer.WriteLine($"{element} words = {name}[safeIndex];");
+            writer.WriteIndent(depth + 1); writer.WriteLine("return index < count ? asfloat(uint3(words.x, words.y, words.z)) : float3(0.0, 0.0, 0.0);");
+            writer.WriteIndent(depth); writer.WriteLine("}");
         }
 
 		private static void ExportSerializedProgramDecomp(ISerializedProgram _this, ShaderWriter writer, ShaderType type)

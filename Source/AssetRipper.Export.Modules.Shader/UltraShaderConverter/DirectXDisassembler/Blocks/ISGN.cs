@@ -31,6 +31,11 @@
 			public int register;
 			public byte mask;
 			public byte usedMask;
+
+			public bool IsVertexId => index == 0 && mask == 1 &&
+				sysValue == (int)SysValueType.vertid && format == (int)FormatType.@uint &&
+				string.Equals(name, "SV_VertexID", StringComparison.OrdinalIgnoreCase);
+
 			public Input(BinaryReader reader)
 			{
 				nameIndex = reader.ReadInt32();
