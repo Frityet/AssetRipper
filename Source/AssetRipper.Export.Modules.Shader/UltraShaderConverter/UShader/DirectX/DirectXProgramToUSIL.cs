@@ -139,6 +139,13 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 			for (int i = 0; i < instructions.Count; i++)
 			{
 				SHDRInstruction inst = instructions[i];
+				if (TryBuildClosedUnsignedRegion(shdr, i, out var region, out int binding, out int end))
+                {
+                    var buffer = new USILOperand { operandType = USILOperandType.ResourceRegister, registerIndex = binding, mask = new[] { 0 } };
+                    Instructions.Add(new USILInstruction { instructionType = USILInstructionType.ClosedUnsignedRegion, srcOperands = new() { buffer }, unsignedRegion = region });
+                    i = end;
+                    continue;
+                }
 				if (i + 2 < instructions.Count && TryFuseStructuredUintLoad(inst, instructions[i + 1], instructions[i + 2]))
 				{
 					i += 2;
@@ -1583,6 +1590,64 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 
 			Instructions.Add(usilInst);
 		}
+
+        public static bool TryBuildClosedUnsignedRegion(SHDR shader, int start, out List<UnsignedRegionOperation> operations, out int binding, out int end)
+        {
+            operations = new(); binding = -1; end = start;
+            var instructions = shader.shaderInstructions;
+            if (start < 0 || start >= instructions.Count || instructions[start].opcode != Opcode.ld_structured) return false;
+            var live = new HashSet<(int, int)>();
+            var result = new List<UnsignedRegionOperation>();
+            int resource = -1;
+            static bool Plain(SHDRInstructionOperand o) => !o.extended && (o.subOperands == null || o.subOperands.All(x => x is null));
+            static bool Temp(SHDRInstructionOperand o) => o.operand == Operand.Temp && o.arraySizes.Length == 1 && o.arraySizes[0] >= 0 && Plain(o) && o.swizzle.Length > 0 && o.swizzle.All(x => x >= 0 && x < 4);
+            static bool Immediate(SHDRInstructionOperand o) => o.operand == Operand.Immediate32 && o.immValues.Length == 1 && Plain(o);
+            static int Lane(SHDRInstructionOperand o, int destinationLane) => o.swizzle.Length == 1 ? o.swizzle[0] : o.swizzle.Length == 4 ? o.swizzle[destinationLane] : -1;
+            for (int i = start; i < instructions.Count; i++)
+            {
+                var ins = instructions[i]; var op = ins.operands;
+                if (ins.saturated) return false;
+                if (ins.opcode == Opcode.ld_structured && op.Count == 4 && Temp(op[0]) && op[0].swizzle.Length == 1 && Immediate(op[1]) && Immediate(op[2]) && op[2].immValues[0] == 0 && double.IsFinite(op[1].immValues[0]) && op[3].operand == Operand.Resource && Plain(op[3]) && op[3].arraySizes.Length == 1 && op[3].swizzle.SequenceEqual(new[] { 0, 0, 0, 0 }))
+                {
+                    int candidate = op[3].arraySizes[0];
+                    if (resource >= 0 && resource != candidate) return false;
+                    resource = candidate;
+                    var dst = (op[0].arraySizes[0], op[0].swizzle[0]);
+                    live.Add(dst);
+                    result.Add(new("load", dst.Item1, dst.Item2, Index: unchecked((uint)BitConverter.SingleToInt32Bits((float)op[1].immValues[0]))));
+                }
+                else if (ins.opcode == Opcode.umax && op.Count == 3 && op.All(Temp) && op[0].swizzle.Length == 1)
+                {
+                    int dl = op[0].swizzle[0], l = Lane(op[1], dl), r = Lane(op[2], dl);
+                    if (l < 0 || r < 0 || !live.Contains((op[1].arraySizes[0], l)) || !live.Contains((op[2].arraySizes[0], r))) return false;
+                    var dst = (op[0].arraySizes[0], dl); live.Add(dst);
+                    result.Add(new("max", dst.Item1, dl, op[1].arraySizes[0], l, op[2].arraySizes[0], r));
+                }
+                else if (ins.opcode == Opcode.utof && op.Count == 2 && op.All(Temp))
+                {
+                    var lanes = op[0].swizzle;
+                    if (lanes.Distinct().Count() != lanes.Length) return false;
+                    foreach (int dl in lanes)
+                    {
+                        int sl = Lane(op[1], dl); var dst = (op[0].arraySizes[0], dl);
+                        if (sl != dl || op[1].arraySizes[0] != dst.Item1 || !live.Contains(dst)) return false;
+                    }
+                    foreach (int dl in lanes)
+                    {
+                        var dst = (op[0].arraySizes[0], dl); live.Remove(dst);
+                        result.Add(new("convert", dst.Item1, dl));
+                    }
+                    if (live.Count == 0)
+                    {
+                        var declarations = instructions.Where(x => x.opcode == Opcode.dcl_resource_structured && x.declData?.operands.Length == 1 && x.declData.operands[0].arraySizes.SequenceEqual(new[] { resource })).ToArray();
+                        if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) return false;
+                        operations = result; binding = resource; end = i; return true;
+                    }
+                }
+                else return false;
+            }
+            return false;
+        }
 
 		private bool TryFuseStructuredUintLoad(SHDRInstruction convert, SHDRInstruction load, SHDRInstruction result)
 		{

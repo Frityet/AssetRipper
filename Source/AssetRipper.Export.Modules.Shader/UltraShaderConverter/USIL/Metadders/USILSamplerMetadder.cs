@@ -55,7 +55,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.USIL.Metadders
 					}
 					else if (operand.operandType == USILOperandType.ResourceRegister)
 					{
-						if (instruction.instructionType is USILInstructionType.LoadStructuredUintToFloat or USILInstructionType.LoadStructuredWords3)
+						if (instruction.instructionType is USILInstructionType.LoadStructuredUintToFloat
+							or USILInstructionType.LoadStructuredWords3 or USILInstructionType.ClosedUnsignedRegion)
 						{
 							var matches = shaderData.BufferParameters.Where(p => p.Index == operand.registerIndex).ToArray();
 							if (matches.Length != 1 || string.IsNullOrEmpty(matches[0].Name)) throw new InvalidDataException("Missing or ambiguous structured buffer binding.");

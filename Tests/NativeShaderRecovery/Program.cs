@@ -142,3 +142,56 @@ if (parsedDeclaration.structuredStride != 16 || parsedDeclaration.operands.Singl
 Console.WriteLine("PASS synthetic DXBC structured declaration retains resource index and stride");
 
 StructuredVertexLoadTest.Run();
+
+// Closed unsigned slices retain the integer values through max and only
+// convert at the original utof. Distinct lanes expose aliasing mistakes.
+static SHDRInstructionOperand TempLane(int register, params int[] lanes)
+{
+    var operand = Blank<SHDRInstructionOperand>();
+    operand.operand = Operand.Temp;
+    operand.arraySizes = [register];
+    operand.swizzle = lanes;
+    operand.subOperands = new SHDRInstructionOperand[1];
+    return operand;
+}
+static SHDRInstructionOperand ImmediateIndex(uint value)
+{
+    var operand = Blank<SHDRInstructionOperand>();
+    operand.operand = Operand.Immediate32;
+    operand.immValues = [BitConverter.Int32BitsToSingle(unchecked((int)value))];
+    operand.subOperands = new SHDRInstructionOperand[1];
+    return operand;
+}
+var x = TempLane(0, 0);
+var y = TempLane(0, 1);
+var z = TempLane(0, 2);
+zero.immValues = [0];
+var rawLoad0 = Instruction(Opcode.ld_structured, x, ImmediateIndex(0), zero, resource);
+var rawLoad1 = Instruction(Opcode.ld_structured, y, ImmediateIndex(1), zero, resource);
+var unsignedMax = Instruction(Opcode.umax, z, x, y);
+var conversions = Instruction(Opcode.utof, TempLane(0, 0, 1, 2), TempLane(0, 0, 1, 2, 3));
+shader.shaderInstructions = [declarationInstruction, rawLoad0, rawLoad1, unsignedMax, conversions];
+if (!DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(shader, 1, out var region, out int resourceIndex, out int regionEnd) || resourceIndex != 0 || regionEnd != 4)
+    throw new Exception("Valid unsigned region rejected");
+var rendered = Emit(new USILInstruction { instructionType = USILInstructionType.ClosedUnsignedRegion, srcOperands = [Named("_Values", [0])], unsignedRegion = region });
+Expect(rendered, "nativeUnsigned0.z = max(nativeUnsigned0.x, nativeUnsigned0.y)");
+Expect(rendered, "tmp0.z = (float)nativeUnsigned0.z");
+foreach (var values in new[] { new uint[] { 16777216, 16777217 }, new uint[] { 0xffffffff, 16777217 } })
+{
+    var registers = new uint[4];
+    var floats = new float[4];
+    foreach (var item in region)
+        if (item.Kind == "load") registers[item.DestinationLane] = values[item.Index];
+        else if (item.Kind == "max") registers[item.DestinationLane] = Math.Max(registers[item.LeftLane], registers[item.RightLane]);
+        else floats[item.DestinationLane] = registers[item.DestinationLane];
+    if (floats[2] != (float)Math.Max(values[0], values[1]) || registers[2] != Math.Max(values[0], values[1]))
+        throw new Exception("Unsigned max or conversion changed");
+}
+unsignedMax.operands[1] = TempLane(1, 0);
+if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(shader, 1, out _, out _, out _))
+    throw new Exception("Uninitialized source was accepted");
+unsignedMax.operands[1] = x;
+conversions.operands[1] = TempLane(1, 0, 1, 2, 3);
+if (DirectXProgramToUSIL.TryBuildClosedUnsignedRegion(shader, 1, out _, out _, out _))
+    throw new Exception("Cross-register conversion was accepted");
+Console.WriteLine("PASS closed unsigned region, precision, uninitialized and alias rejection");

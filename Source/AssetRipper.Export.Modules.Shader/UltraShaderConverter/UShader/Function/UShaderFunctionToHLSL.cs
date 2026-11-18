@@ -68,6 +68,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.LoadResource, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceMultisampled, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceStructured, new InstHandler(HandleLoadResourceStructured) },
+				{ USILInstructionType.ClosedUnsignedRegion, new InstHandler(HandleClosedUnsignedRegion) },
 				{ USILInstructionType.LoadStructuredUintToFloat, new InstHandler(HandleLoadStructuredUintToFloat) },
 				{ USILInstructionType.LoadStructuredWords3, new InstHandler(HandleLoadStructuredWords3) },
 				{ USILInstructionType.Discard, new InstHandler(HandleDiscard) },
@@ -548,6 +549,25 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 			string integerType = width == 1 ? "int" : "int" + width;
 			EmitTextureResult(inst, $"{TextureName(ops[1])}.Load({integerType}({ops[0]}){TextureOffset(inst)})");
 		}
+
+        private void HandleClosedUnsignedRegion(USILInstruction inst)
+        {
+            var operations = inst.unsignedRegion ?? throw new InvalidDataException("Missing unsigned region");
+            string buffer = TextureName(inst.srcOperands[0]);
+            const string lanes = "xyzw";
+            AppendLine("{");
+            foreach (int register in operations.Select(x => x.DestinationRegister).Distinct().OrderBy(x => x))
+                AppendLine($"uint4 nativeUnsigned{register} = 0u;");
+            foreach (var op in operations)
+            {
+                string dst = $"nativeUnsigned{op.DestinationRegister}.{lanes[op.DestinationLane]}";
+                if (op.Kind == "load") AppendLine($"{dst} = NativeStructuredUintRaw{buffer}({op.Index}u);");
+                else if (op.Kind == "max") AppendLine($"{dst} = max(nativeUnsigned{op.LeftRegister}.{lanes[op.LeftLane]}, nativeUnsigned{op.RightRegister}.{lanes[op.RightLane]});");
+                else if (op.Kind == "convert") AppendLine($"tmp{op.DestinationRegister}.{lanes[op.DestinationLane]} = (float){dst};");
+                else throw new InvalidDataException("Invalid unsigned region operation");
+            }
+            AppendLine("}");
+        }
 
 		private void HandleLoadStructuredUintToFloat(USILInstruction inst)
 		{
