@@ -404,9 +404,25 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				op1Text = $"int{op1IntSize}({srcOp1})";
 			}
 
-			string value = $"float{op0IntSize}({op0Text} << {op1Text})";
 			string comment = CommentString(inst);
+			bool metalScalar = op0IntSize == 1 && op1IntSize == 1 && !inst.commented;
+			if (metalScalar)
+			{
+				// Unity's Metal HLSLcc can fold a scalar left shift and vector low bits
+				// into a bitFieldInsert call with incompatible scalar/vector arguments.
+				// Reverse both sides of an unsigned right shift to preserve the same
+				// 32-bit result without producing that DXBC optimization pattern.
+				AppendLine("#if defined(SHADER_API_METAL)");
+				AppendLine($"{inst.destOperand} = float1(asint(reversebits(reversebits(asuint({op0Text})) >> (asuint({op1Text}) & 31u))));");
+				AppendLine("#else");
+			}
+
+			string value = $"float{op0IntSize}({op0Text} << {op1Text})";
 			AppendLine($"{comment}{inst.destOperand} = {value};");
+			if (metalScalar)
+			{
+				AppendLine("#endif");
+			}
 		}
 
 		private void HandleShiftRight(USILInstruction inst)
