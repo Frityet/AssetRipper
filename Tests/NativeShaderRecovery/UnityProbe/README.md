@@ -12,6 +12,11 @@ conversion boundary, and both Material and integer-ID MaterialPropertyBlock
 bindings through GPU readback. It contains no game input. This focused probe
 is not a stock-game or full shader semantic acceptance test.
 
+Run `StructuredVertexProbe.Run` with the same arguments to verify a
+12-byte buffer using real `SV_VertexID` inputs. It checks the bits of all
+three loaded floats and the zero result for indices outside the logical
+buffer count, through both Material and MaterialPropertyBlock bindings.
+
 Unity 2021's Metal translator may speculate buffer reads across an early
 return. The generated helper clamps the actual read index and requires the
 host to bind a real buffer whose length is at least `max(count, 1)`, including

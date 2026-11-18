@@ -23,6 +23,7 @@
 
 		// should be functions
 		public const string VERT_INPUT_NAME = "v";
+		public const string VERTEX_ID_INPUT_NAME = "vertexId";
 		public const string VERT_OUTPUT_LOCAL_NAME = "o";
 		public const string VERT_TO_FRAG_STRUCT_NAME = "v2f";
 

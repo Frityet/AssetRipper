@@ -184,7 +184,8 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 					name = inputName,
 					register = register,
 					mask = mask,
-					isOutput = false
+					isOutput = false,
+					isVertexId = dxInput.IsVertexId,
 				};
 
 				Inputs.Add(usilInput);
@@ -1612,15 +1613,64 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Direct
 				load.operands[3].operand != Operand.Resource || load.operands[3].arraySizes.Length != 1 ||
 				load.operands[3].swizzle.Length != 4 || load.operands[3].swizzle.Any(x => x != 0)) return false;
 			int candidate = load.operands[3].arraySizes[0];
-			var declarations = shader.shaderInstructions.Where(i => i.opcode == Opcode.dcl_resource_structured &&
-				i.declData?.operands.Length == 1 && i.declData.operands[0].arraySizes.SequenceEqual(new[] { candidate })).ToArray();
-			if (declarations.Length != 1 || declarations[0].declData!.structuredStride != 4) return false;
+			if (shader.GetStructuredResourceStride(candidate) != 4) return false;
 			binding = candidate;
 			return true;
 		}
 
+		public static bool IsSupportedStructuredVertexLoad(DirectXCompiledShader shader, SHDRInstruction inst, out int binding)
+		{
+			binding = -1;
+			if (inst.opcode != Opcode.ld_structured || shader.Shdr.shaderType != DirectXDisassembler.Type.Vertex ||
+				inst.saturated || inst.operands.Count != 4)
+			{
+				return false;
+			}
+
+			var dest = inst.operands[0];
+			var address = inst.operands[1];
+			var offset = inst.operands[2];
+			var resource = inst.operands[3];
+			if (dest is not { operand: Operand.Temp, arraySizes: [_], swizzle: [0, 1, 2] } ||
+				address is not { operand: Operand.Input, arraySizes: [int inputRegister], swizzle: [0] } ||
+				offset is not { operand: Operand.Immediate32, arraySizes: [], immValues: [double byteOffset] } ||
+				BitConverter.SingleToInt32Bits((float)byteOffset) != 0 ||
+				resource is not { operand: Operand.Resource, arraySizes: [int candidate], swizzle: [0, 1, 2, _] } ||
+				inst.operands.Any(operand => operand.extended || operand.subOperands.Any(relative => relative is not null)) ||
+				shader.Shdr.GetStructuredResourceStride(candidate) != 12 ||
+				!shader.Isgn.inputs.Any(input => input.register == inputRegister && input.IsVertexId))
+			{
+				return false;
+			}
+			binding = candidate;
+			return true;
+		}
+
+		private void LoadStructuredWords3(SHDRInstruction inst)
+		{
+			var dest = inst.operands[0];
+			var address = inst.operands[1];
+			var resource = inst.operands[3];
+			USILOperand usilDest = new(), usilAddress = new(), usilResource = new();
+			FillUSILOperand(dest, usilDest, dest.swizzle, false);
+			FillUSILOperand(address, usilAddress, address.swizzle, true);
+			FillUSILOperand(resource, usilResource, [0], false);
+			Instructions.Add(new USILInstruction
+			{
+				instructionType = USILInstructionType.LoadStructuredWords3,
+				destOperand = usilDest,
+				srcOperands = new() { usilAddress, usilResource },
+			});
+		}
+
 		private void HandleLdStructured(SHDRInstruction inst)
 		{
+			if (IsSupportedStructuredVertexLoad(_dxShader, inst, out _))
+			{
+				LoadStructuredWords3(inst);
+				return;
+			}
+
 			SHDRInstructionOperand dest = inst.operands[0]; // The address of the result of the operation.
 			SHDRInstructionOperand srcAddress = inst.operands[1]; // Specifies the index of the structure to read.
 			SHDRInstructionOperand srcByteOffset = inst.operands[2]; // Specifies the byte offset in the structure to start reading from. 

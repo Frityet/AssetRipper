@@ -69,6 +69,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 				{ USILInstructionType.LoadResourceMultisampled, new InstHandler(HandleLoadResource) },
 				{ USILInstructionType.LoadResourceStructured, new InstHandler(HandleLoadResourceStructured) },
 				{ USILInstructionType.LoadStructuredUintToFloat, new InstHandler(HandleLoadStructuredUintToFloat) },
+				{ USILInstructionType.LoadStructuredWords3, new InstHandler(HandleLoadStructuredWords3) },
 				{ USILInstructionType.Discard, new InstHandler(HandleDiscard) },
 				{ USILInstructionType.ResourceDimensionInfo, new InstHandler(HandleResourceDimensionInfo) },
 				{ USILInstructionType.SampleCountInfo, new InstHandler(HandleSampleCountInfo) },
@@ -536,6 +537,12 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 		{
 			string buffer = TextureName(inst.srcOperands[1]);
 			AppendLine($"{CommentString(inst)}{inst.destOperand} = NativeStructuredUintLoad{buffer}({inst.srcOperands[0]});");
+		}
+
+		private void HandleLoadStructuredWords3(USILInstruction inst)
+		{
+			string buffer = TextureName(inst.srcOperands[1]);
+			AppendLine($"{CommentString(inst)}{inst.destOperand} = NativeStructuredWords3Load{buffer}({inst.srcOperands[0]});");
 		}
 
 		private void HandleLoadResourceStructured(USILInstruction inst)
