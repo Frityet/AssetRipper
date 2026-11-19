@@ -31,6 +31,14 @@ var destination = Named("result", [0, 2]);
 var coordinates = Named("coord", [0, 1, 2]);
 var texture = Named("_FixtureTexture", [3, 0]);
 var sampler = Named("_FixtureTexture", [0]);
+foreach (var (operation, intrinsic) in new[] {
+    (USILInstructionType.Logarithm2, "log2"), (USILInstructionType.Exponential, "exp2")
+})
+{
+    var unarySource = Named("source", [0, 2]);
+    Expect(Emit(new USILInstruction { instructionType = operation, destOperand = destination, srcOperands = [unarySource] }),
+        $"result.xz = {intrinsic}(source.xz);");
+}
 var load = new USILInstruction
 {
     instructionType = USILInstructionType.LoadResource,

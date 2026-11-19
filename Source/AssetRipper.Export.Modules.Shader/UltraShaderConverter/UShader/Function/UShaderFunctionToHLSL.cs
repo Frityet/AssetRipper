@@ -286,7 +286,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 		private void HandleLogarithm2(USILInstruction inst)
 		{
 			List<USILOperand> srcOps = inst.srcOperands;
-			string value = $"log({srcOps[0]})";
+			string value = $"log2({srcOps[0]})";
 			string comment = CommentString(inst);
 			AppendLine($"{comment}{inst.destOperand} = {value};");
 		}
@@ -294,7 +294,7 @@ namespace AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.Functi
 		private void HandleExponential(USILInstruction inst)
 		{
 			List<USILOperand> srcOps = inst.srcOperands;
-			string value = $"exp({srcOps[0]})";
+			string value = $"exp2({srcOps[0]})";
 			string comment = CommentString(inst);
 			AppendLine($"{comment}{inst.destOperand} = {value};");
 		}
