@@ -613,7 +613,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
                 writer.WriteIndent(depth); writer.WriteLine($"{rawType} NativeStructuredUintRaw{buffer.Name}(uint index) {{");
                 writer.WriteLine("#if defined(SHADER_API_METAL)");
                 writer.WriteIndent(depth + 1); writer.WriteLine($"uint count = (uint)max(_NativeH3VRBufferCount{buffer.Name}, 0);");
-                writer.WriteLine("#elif defined(SHADER_API_D3D11)");
+                writer.WriteLine("#elif defined(SHADER_API_D3D11) || defined(SHADER_API_VULKAN)");
                 writer.WriteIndent(depth + 1); writer.WriteLine($"uint count, stride; {buffer.Name}.GetDimensions(count, stride);");
                 writer.WriteLine("#else"); writer.WriteLine("#error Structured buffer bounds are unsupported on this shader backend"); writer.WriteLine("#endif");
                 // Unity 2021's Metal translator may speculate a load past an
@@ -661,7 +661,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
             writer.WriteIndent(depth); writer.WriteLine($"float3 NativeStructuredWords3Load{name}(uint index) {{");
             writer.WriteLine("#if defined(SHADER_API_METAL)");
             writer.WriteIndent(depth + 1); writer.WriteLine($"uint count = (uint)max({count}, 0);");
-            writer.WriteLine("#elif defined(SHADER_API_D3D11)");
+            writer.WriteLine("#elif defined(SHADER_API_D3D11) || defined(SHADER_API_VULKAN)");
             writer.WriteIndent(depth + 1); writer.WriteLine($"uint count, stride; {name}.GetDimensions(count, stride);");
             writer.WriteLine("#else"); writer.WriteLine("#error Structured buffer bounds are unsupported on this shader backend"); writer.WriteLine("#endif");
             // Clamp the issued load even when HLSLcc evaluates it before the bounds predicate.
