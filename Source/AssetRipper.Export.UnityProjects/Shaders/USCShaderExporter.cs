@@ -125,6 +125,7 @@ namespace AssetRipper.Export.UnityProjects.Shaders
 				ExportSubShaderDecomp(_this.SubShaders[i], writer);
 			}
 
+			_this.ExportDependencies(writer);
 			if (_this.FallbackName.String.Length != 0)
 			{
 				writer.WriteIndent(1);

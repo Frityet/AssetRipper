@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using AssetRipper.Export.Modules.Shaders.IO;
+using AssetRipper.SourceGenerated.Subclasses.SerializedShader;
 using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisassembler;
 using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.DirectXDisassembler.Blocks;
 using AssetRipper.Export.Modules.Shaders.UltraShaderConverter.UShader.DirectX;
@@ -30,6 +32,17 @@ static void Expect(string text, string expected)
 var destination = Named("result", [0, 2]);
 var coordinates = Named("coord", [0, 1, 2]);
 var texture = Named("_FixtureTexture", [3, 0]);
+var terrainShader = new SerializedShader_5_6();
+var detail = terrainShader.Dependencies.AddNew();
+detail.From = "Details0";
+detail.To = "Hidden/Test/Details0";
+var tree = terrainShader.Dependencies.AddNew();
+tree.From = "Tree0";
+tree.To = "Hidden/Test/Tree";
+using var dependencyText = new StringWriter();
+terrainShader.ExportDependencies(dependencyText);
+if (dependencyText.ToString() != "\tDependency \"Details0\" = \"Hidden/Test/Details0\"\n\tDependency \"Tree0\" = \"Hidden/Test/Tree\"\n")
+    throw new Exception("ShaderLab terrain dependencies did not retain their names, targets and order");
 var sampler = Named("_FixtureTexture", [0]);
 foreach (var (operation, intrinsic) in new[] {
     (USILInstructionType.Logarithm2, "log2"), (USILInstructionType.Exponential, "exp2")

@@ -252,6 +252,15 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 			writer.Write('\n');
 		}
 
+		public static void ExportDependencies(this ISerializedShader shader, TextWriter writer)
+		{
+			static string Escape(string name) => name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+			foreach (var dependency in shader.Dependencies)
+			{
+				writer.Write($"\tDependency \"{Escape(dependency.From.String)}\" = \"{Escape(dependency.To.String)}\"\n");
+			}
+		}
+
 		public static void Export(this ISerializedShader _this, ShaderWriter writer)
 		{
 			writer.Write($"Shader \"{_this.Name}\" {{\n");
@@ -263,6 +272,7 @@ namespace AssetRipper.Export.Modules.Shaders.IO
 				_this.SubShaders[i].Export(writer);
 			}
 
+			_this.ExportDependencies(writer);
 			if (_this.FallbackName.Data.Length != 0)
 			{
 				writer.WriteIndent(1);
